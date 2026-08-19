@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — {{ site_name }}{% endblock %}
+{% block main_class %}prose{% endblock %}
+
+{% block content %}
+<p class="mono dim" style="font-size:var(--fs-3xl);margin:0">{{ code }}</p>
+<h1 style="margin-bottom:var(--sp-3)">{{ heading }}</h1>
+<p>{{ message }}</p>
+
+{% if code == 404 %}
+  <form action="/search" method="get" class="row" style="margin:var(--sp-5) 0">
+    <input type="search" name="q" data-search-input placeholder="Search a company or ticker"
+           style="flex:1;min-width:220px" aria-label="Search companies">
+    <button type="submit">Search</button>
+  </form>
+
+  {% if footer_tickers() %}
+    <h2>Popular companies</h2>
+    <div class="chips">
+      {% for t in footer_tickers() %}<a class="chip" href="/stocks/{{ t }}">{{ t }}</a>{% endfor %}
+    </div>
+  {% endif %}
+
+  <p style="margin-top:var(--sp-5)">
+    Or browse <a href="/stocks">all companies</a> ·
+    <a href="/screener">run a screen</a>
+  </p>
+{% else %}
+  <p><a href="/">Back to the home page</a></p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,44 @@
+{#
+  Ticker belt. Hangs under the header on every page.
+
+  Server-rendered with real values so it's populated on first paint and works
+  with JavaScript disabled. tape.js then takes over: it swaps in the user's
+  watchlist if they have one, and refreshes prices in place.
+
+  The list is rendered TWICE. The duplicate is what makes the CSS loop seamless
+  -- the track translates -50% and lands exactly where it started. The copy is
+  aria-hidden so screen readers don't announce every symbol twice.
+#}
+{% set items = tape_items() %}
+{% if items %}
+<div class="tape" data-tape data-count="{{ items|length }}"
+     style="--tape-duration: {{ items|length * 4 }}s">
+
+  <div class="tape-viewport">
+    <div class="tape-track" data-tape-track>
+      {% for pass in [false, true] %}
+        {% for it in items %}
+          <a class="tape-item" href="/stocks/{{ it.ticker }}"
+             data-tape-item="{{ it.ticker }}"
+             {% if pass %}aria-hidden="true" tabindex="-1"{% endif %}>
+            <span class="tape-sym">{{ it.ticker }}</span>
+            <span class="tape-px" data-tape-price>{{ render_cell(it.price, 'num') }}</span>
+            {% if it.change_pct is not none %}
+              <span class="tape-chg {{ 'up' if it.change_pct >= 0 else 'down' }}" data-tape-change>
+                {{ '▲' if it.change_pct >= 0 else '▼' }}{{ '%.2f'|format(it.change_pct|abs) }}%
+              </span>
+            {% else %}
+              <span class="tape-chg dim" data-tape-change>—</span>
+            {% endif %}
+          </a>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="tape-label" data-tape-label>
+    <span data-tape-source>{{ tape_label() }}</span>
+    <span class="dim" data-tape-set>Top</span>
+  </div>
+</div>
+{% endif %}

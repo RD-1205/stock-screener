@@ -1,0 +1,8 @@
+{% from "_partials/fintable.html" import fintable %}
+{% from "_partials/states.html" import empty %}
+{% if statement.periods %}
+  {{ fintable(statement, "yoy", "Income statement and cash flow by period") }}
+{% else %}
+  {{ empty("No data for this period type",
+           "Quarterly figures need at least one 10-Q to have been ingested.") }}
+{% endif %}

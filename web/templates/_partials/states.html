@@ -1,0 +1,48 @@
+{#
+  The four states every async surface needs.
+
+  The one people skip is `partial` — a company with 3 years of history instead
+  of 10, or no institutional holders. Skipped, it renders as "broken" rather
+  than "incomplete", and users assume the whole site is unreliable.
+
+  Usage:
+    {% from "_partials/states.html" import loading, empty, error, partial %}
+    {{ empty("No companies match", "Try widening a filter.", "/screener", "Reset") }}
+#}
+
+{% macro loading(rows=6, label="Loading") -%}
+<div class="state" role="status" aria-live="polite" aria-busy="true">
+  <span class="sr-only">{{ label }}…</span>
+  {% for _ in range(rows) %}
+    <div class="skeleton skeleton-row" aria-hidden="true"></div>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro empty(title, detail="", href="", cta="") -%}
+<div class="state">
+  <p class="state-title">{{ title }}</p>
+  {% if detail %}<p style="margin:0">{{ detail }}</p>{% endif %}
+  {% if href and cta %}
+    <p class="state-action"><a class="btn btn-secondary" href="{{ href }}">{{ cta }}</a></p>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro error(message, detail="") -%}
+<div class="err" role="alert">
+  {{ message }}
+  {% if detail %}<div style="margin-top:var(--sp-2);color:var(--text-2)">{{ detail }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{#
+  `partial` explains WHY data is thin rather than hiding it. Every dash on
+  this site should be explainable — that's the whole "show your work" posture.
+#}
+{% macro partial(message, detail="") -%}
+<div class="banner-warn" role="note">
+  <strong style="color:var(--text-1);font-weight:var(--fw-medium)">{{ message }}</strong>
+  {% if detail %}<div style="margin-top:var(--sp-1)">{{ detail }}</div>{% endif %}
+</div>
+{%- endmacro %}

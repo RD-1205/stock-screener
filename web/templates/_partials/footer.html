@@ -1,0 +1,61 @@
+{#
+  The footer is doing real work, not decoration. It is the main way search
+  engines discover ~5,000 company pages and every generated list, so the link
+  columns below are load-bearing (see docs/SITEMAP.md §6).
+#}
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-cols">
+
+      <div>
+        <h3>Product</h3>
+        <ul>
+          <li><a href="/screener">Screener</a></li>
+          <li><a href="/stocks">All companies</a></li>
+          <li><a href="/screens">Screens</a></li>
+          <li><a href="/coverage">Data coverage</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3>Popular stocks</h3>
+        <ul>
+          {% for t in footer_tickers() %}
+            <li><a href="/stocks/{{ t }}">{{ t }}</a></li>
+          {% else %}
+            <li class="dim">No companies ingested yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div>
+        <h3>About</h3>
+        <ul>
+          <li><a href="/methodology">Methodology</a></li>
+          <li><a href="/about">About</a></li>
+          <li><a href="/api/docs">API docs</a></li>
+          <li><a href="/feed.rss">RSS</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <h3>Legal</h3>
+        <ul>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/disclaimer">Disclaimer</a></li>
+        </ul>
+      </div>
+
+    </div>
+
+    <div class="footer-bottom">
+      <p class="disclaimer" style="margin:0">
+        Fundamentals sourced from SEC EDGAR XBRL filings (public domain).
+        <strong>Not investment advice.</strong> Data may contain errors —
+        verify against the primary filings before acting on anything here.
+      </p>
+      <span style="margin-left:auto">© {{ year }} {{ site_name }}</span>
+    </div>
+  </div>
+</footer>

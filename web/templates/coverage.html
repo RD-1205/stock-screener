@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Coverage — us-screener{% endblock %}
+
+{% block content %}
+<h1>Metric coverage</h1>
+<p class="sub">
+  What fraction of ingested companies resolve to a value for each metric, and
+  which raw tags they resolved from. Sorted worst first.
+</p>
+
+<div class="note">
+  This is your work queue. A low percentage means companies are using a us-gaap
+  tag that isn't in <code>screener/concepts.py</code> yet — the fix is one line
+  added to that metric's candidate list. There are ~14,000 tags in the taxonomy
+  and filers choose freely, so you cannot find these gaps by reading filings by
+  hand. Watch the tag column too: a tag you don't recognise appearing on many
+  companies usually means an industry (banks, REITs, insurers) reports that
+  line differently.
+</div>
+
+<div class="panel" style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:left">Metric</th>
+        <th style="text-align:left">Type</th>
+        <th>Companies</th>
+        <th>Coverage</th>
+        <th style="width:180px"></th>
+        <th style="text-align:left">Resolved from</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <td style="text-align:left;font-family:var(--mono)">{{ r.metric }}</td>
+          <td style="text-align:left;font-family:inherit" class="muted">{{ r.kind }}</td>
+          <td>{{ r.got }} / {{ r.total }}</td>
+          <td>{{ '%.0f' % r.pct }}%</td>
+          <td>
+            <div class="bar-bg">
+              <div class="bar-fg" style="width:{{ '%.0f' % r.pct }}%;
+                {% if r.pct < 50 %}background:var(--bad)
+                {% elif r.pct < 85 %}background:#d29922{% endif %}"></div>
+            </div>
+          </td>
+          <td style="text-align:left;font-family:inherit">
+            {% if r.tags %}
+              {% for tag, n in r.tags %}
+                <span class="pill" title="{{ n }} companies">{{ tag }} ({{ n }})</span>
+              {% endfor %}
+            {% else %}
+              <span class="muted">nothing resolved &mdash;
+                {{ r.candidates }} candidate tag{{ '' if r.candidates == 1 else 's' }} tried</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

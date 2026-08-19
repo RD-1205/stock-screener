@@ -1,0 +1,28 @@
+<header class="site-header">
+  <a class="brand" href="/">{{ site_name }}<span class="dot">.</span></a>
+
+  <nav class="site-nav" aria-label="Main">
+    {% for href, label in nav_items %}
+      <a href="{{ href }}"
+         {% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  <div class="header-right">
+    {# Jinja blocks don't cross an {% include %}, so pages pass a plain
+       string via `header_note` rather than overriding a block here. #}
+    {% if header_note %}<span class="dim" style="font-size:var(--fs-sm)">{{ header_note }}</span>{% endif %}
+
+    <button class="search-trigger" data-search-trigger type="button"
+            aria-label="Search companies">
+      <span aria-hidden="true">⌕</span>
+      <span>Search</span>
+      <span class="kbd" aria-hidden="true">⌘K</span>
+    </button>
+
+    <button class="icon-btn" data-theme-toggle type="button"
+            aria-label="Switch theme">
+      <span data-theme-icon aria-hidden="true">☾</span>
+    </button>
+  </div>
+</header>

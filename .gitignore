@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# databases + downloaded data
+*.db
+*.db-wal
+*.db-shm
+companyfacts.zip
+_fixtures/
+fixtures/
+
+.env
+.DS_Store
+.idea/
+.vscode/
+.pytest_cache/

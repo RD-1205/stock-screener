@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ site_name }} — US stock screener built on SEC filings{% endblock %}</title>
+<meta name="description" content="{% block description %}Screen US equities on fundamentals parsed straight from SEC EDGAR filings — with the filing dates kept, so you can run any screen as of a past date.{% endblock %}">
+{% block head_extra %}{% endblock %}
+<link rel="canonical" href="{{ canonical or request.url.path }}">
+
+<script>
+/* Applies stored preferences before first paint. Inline and synchronous on
+   purpose: an external file would paint the wrong theme first, and a
+   dark-to-light flash on every page load is the cheapest way to make a site
+   feel broken. Kept tiny so it costs nothing. */
+(function(){try{var r=document.documentElement,s=localStorage;
+var t=s.getItem('ui.theme');if(!t)t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+r.setAttribute('data-theme',t);
+var d=s.getItem('ui.density');if(d)r.setAttribute('data-density',d);
+var m=s.getItem('ui.motion');if(m)r.setAttribute('data-motion',m);}catch(e){}})();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+{% block styles %}{% endblock %}
+
+<link rel="alternate" type="application/rss+xml" title="{{ site_name }} filing news" href="/feed.rss">
+<link rel="search" type="application/opensearchdescription+xml" title="{{ site_name }}" href="/opensearch.xml">
+{% if noindex %}<meta name="robots" content="noindex, follow">{% endif %}
+
+<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+<script src="{{ url_for('static', path='js/app.js') }}" defer></script>
+<script src="{{ url_for('static', path='js/tape.js') }}" defer></script>
+</head>
+
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+{% include "_partials/header.html" %}
+{% include "_partials/tape.html" %}
+
+<main id="main" class="{% block main_class %}{% endblock %}">
+{% block content %}{% endblock %}
+</main>
+
+{% include "_partials/footer.html" %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

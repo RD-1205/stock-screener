@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Stock screens — {{ site_name }}{% endblock %}
+{% block description %}Ready-made stock screens for quality, value, growth and cash generation, run live against SEC filing data.{% endblock %}
+
+{% block content %}
+<h1>Screens</h1>
+<p class="sub">Ready-made starting points. Open any one to edit it in the screener.</p>
+
+<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">
+  {% for c in cards %}
+    <div class="panel">
+      <h3 style="font-size:var(--fs-base);margin-bottom:var(--sp-2)">{{ c.label }}</h3>
+      <code class="mono" style="display:block;font-size:var(--fs-sm);color:var(--text-2);
+            background:var(--surface-2);border-radius:var(--radius-sm);
+            padding:var(--sp-2);margin-bottom:var(--sp-3);word-break:break-word">{{ c.query }}</code>
+      <div class="row" style="justify-content:space-between">
+        <span class="dim mono" style="font-size:var(--fs-sm)">
+          {% if c.count is not none %}{{ c.count }} matches{% else %}—{% endif %}
+        </span>
+        <a class="btn btn-secondary" href="/screener?q={{ c.query|urlencode }}">Open</a>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% if error %}
+  <div class="err">{{ error }}</div>
+{% elif not rows %}
+  <div class="empty">No companies match this screen.</div>
+{% else %}
+  <table>
+    <thead>
+      <tr>
+        {% for key, label, kind in cols %}
+          {% set nd = 'asc' if (order == key and dir == 'desc') else 'desc' %}
+          <th>
+            <a href="#"
+               hx-get="/results?q={{ q|urlencode }}&as_of={{ as_of }}&order={{ key }}&dir={{ nd }}&limit={{ limit }}"
+               hx-target="#results" hx-swap="innerHTML">
+              {{ label }}{% if order == key %} {{ '▼' if dir == 'desc' else '▲' }}{% endif %}
+            </a>
+          </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          {% for key, label, kind in cols %}
+            <td>
+              {% if key == 'ticker' %}
+                <a href="/company/{{ r['ticker'] }}">{{ r['ticker'] }}</a>
+              {% else %}
+                {{ render_cell(r[key], kind) }}
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:12px;font-size:12px">
+    {{ rows|length }} result{{ '' if rows|length == 1 else 's' }}
+    {%- if as_of %} &middot; as of <span class="pill">{{ as_of }}</span>
+      &middot; using only filings that existed on that date{% endif %}
+  </p>
+{% endif %}

@@ -1,0 +1,227 @@
+/* ==========================================================================
+   Design tokens — "ink & amber"
+
+   Dark is the default; light is a full peer, not an afterthought.
+
+   Rules:
+   - Never hardcode a colour in a template. If a value isn't here, add it here.
+   - Components use only semantic tokens (--surface-1, --text-2). The raw
+     palette exists so the semantic layer has something to point at.
+   - Every token must exist in BOTH themes or it breaks in one of them.
+
+   Why amber and not blue: green and red are permanently reserved for price
+   direction, so the accent has to sit far from both. Amber does, it carries
+   finance-terminal heritage, and it doesn't look like every other site in the
+   category (Finviz, Koyfin, TradingView and stockanalysis are all blue).
+   ========================================================================== */
+
+:root {
+  /* ---- raw palette — warm neutrals, never used directly ---------------- */
+  --c-ink-950: #080806;
+  --c-ink-900: #0c0b09;
+  --c-ink-850: #11100e;
+  --c-ink-800: #151310;
+  --c-ink-750: #1c1916;
+  --c-ink-700: #232019;
+  --c-ink-650: #2e2a22;
+  --c-ink-600: #3a352b;
+  --c-ink-500: #423c31;
+  --c-ink-400: #6f675c;
+  --c-ink-300: #9a9184;
+  --c-ink-200: #c3bbae;
+  --c-ink-100: #ddd8cd;
+  --c-ink-75:  #eeebe3;
+  --c-ink-50:  #f3f1eb;
+  --c-ink-25:  #fbfaf7;
+  --c-white:   #ffffff;
+
+  --c-amber-300: #f0bb55;
+  --c-amber-400: #e0a83c;
+  --c-amber-600: #b07d1e;
+  --c-amber-700: #9a6b12;
+
+  --c-green-400: #5cc46a;
+  --c-green-700: #1d7a3a;
+  --c-red-400:   #f2665c;
+  --c-red-700:   #c0392b;
+
+  /* ---- typography ------------------------------------------------------ */
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+               monospace;
+  --font-serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+
+  --fs-2xs: 10px;
+  --fs-xs:  11px;
+  --fs-sm:  12px;
+  --fs-md:  13px;    /* tables and dense UI */
+  --fs-base:14px;    /* body */
+  --fs-lg:  16px;
+  --fs-xl:  19px;
+  --fs-2xl: 24px;
+  --fs-3xl: 32px;
+  --fs-4xl: 42px;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-bold:   600;
+
+  --lh-tight: 1.25;
+  --lh-base:  1.5;
+  --lh-loose: 1.65;
+
+  --tracking-wide: .04em;
+
+  /* ---- spacing (4px base) ---------------------------------------------- */
+  --sp-1: 4px;   --sp-2: 8px;   --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 22px;  --sp-6: 28px;  --sp-7: 40px;  --sp-8: 56px;
+
+  /* ---- radii ----------------------------------------------------------- */
+  --radius-sm: 5px;
+  --radius:    7px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* ---- layout ---------------------------------------------------------- */
+  --header-h: 56px;
+  --max-w: 1220px;
+  --max-w-prose: 700px;
+
+  /* ---- motion ---------------------------------------------------------- */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --ease: cubic-bezier(.2, 0, .2, 1);
+
+  /* ---- density (overridden by [data-density]) -------------------------- */
+  --row-h: 38px;
+  --cell-pad-y: 9px;
+  --cell-pad-x: 10px;
+}
+
+/* ==========================================================================
+   Dark (default)
+   ========================================================================== */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:           var(--c-ink-900);
+  --surface-1:    var(--c-ink-800);
+  --surface-2:    var(--c-ink-750);
+  --surface-3:    var(--c-ink-700);
+  --surface-sunk: var(--c-ink-950);
+
+  --border:        var(--c-ink-650);
+  --border-strong: var(--c-ink-500);
+  --border-subtle: rgba(46, 42, 34, .6);
+
+  --text-1: #efe9de;
+  --text-2: var(--c-ink-300);
+  --text-3: var(--c-ink-400);
+  --text-inverse: var(--c-ink-900);
+
+  --accent:     var(--c-amber-400);
+  --accent-hov: var(--c-amber-300);
+  --accent-fg:  #1a1408;
+  --accent-bg:  rgba(224, 168, 60, .14);
+  --accent-border: rgba(224, 168, 60, .34);
+
+  --up:      var(--c-green-400);
+  --up-bg:   rgba(92, 196, 106, .13);
+  --down:    var(--c-red-400);
+  --down-bg: rgba(242, 102, 92, .13);
+
+  /* Warning deliberately shares the accent hue — a separate orange next to
+     amber reads as muddy. Errors use --down, which is unambiguous. */
+  --warn:    var(--c-amber-400);
+  --warn-bg: rgba(224, 168, 60, .11);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 14px 38px rgba(0, 0, 0, .55);
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* ==========================================================================
+   Light
+   ========================================================================== */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:           var(--c-ink-25);
+  --surface-1:    var(--c-ink-50);
+  --surface-2:    var(--c-white);
+  --surface-3:    var(--c-ink-75);
+  --surface-sunk: var(--c-ink-100);
+
+  --border:        var(--c-ink-100);
+  --border-strong: #c4bcaa;
+  --border-subtle: rgba(221, 216, 205, .75);
+
+  --text-1: #1a1814;
+  --text-2: #6b6558;
+  --text-3: #928b7c;
+  --text-inverse: var(--c-ink-25);
+
+  /* Amber at full brightness fails contrast on paper, so light mode steps
+     down two stops. Same hue, ~5:1 against the background. */
+  --accent:     var(--c-amber-700);
+  --accent-hov: var(--c-amber-600);
+  --accent-fg:  var(--c-ink-25);
+  --accent-bg:  rgba(154, 107, 18, .10);
+  --accent-border: rgba(154, 107, 18, .30);
+
+  --up:      var(--c-green-700);
+  --up-bg:   rgba(29, 122, 58, .10);
+  --down:    var(--c-red-700);
+  --down-bg: rgba(192, 57, 43, .10);
+
+  --warn:    #8a5f0f;
+  --warn-bg: rgba(154, 107, 18, .12);
+
+  --shadow-sm: 0 1px 2px rgba(26, 24, 20, .06);
+  --shadow-md: 0 4px 14px rgba(26, 24, 20, .09);
+  --shadow-lg: 0 14px 38px rgba(26, 24, 20, .14);
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* ==========================================================================
+   Density — compact for scanning hundreds of rows, comfortable for everyone
+   else. Set on <html>, persisted in localStorage.
+   ========================================================================== */
+[data-density="compact"] {
+  --row-h: 32px; --cell-pad-y: 6px; --cell-pad-x: 8px; --fs-md: 12px;
+}
+[data-density="comfortable"] {
+  --row-h: 44px; --cell-pad-y: 12px; --cell-pad-x: 13px;
+}
+
+/* ==========================================================================
+   Reduced motion — two paths on purpose.
+
+   The OS preference, and an in-app override for people who want it on this
+   site only. Both are load-bearing: they are the reason the ticker tape (R5)
+   can ship without a visible pause button.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+[data-motion="reduce"] { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+[data-motion="reduce"] *,
+[data-motion="reduce"] *::before,
+[data-motion="reduce"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+}

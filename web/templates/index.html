@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Screen US equities</h1>
+<p class="sub">
+  Fundamentals parsed from SEC EDGAR XBRL filings. Type a query, or replay it
+  against a historical date to see what it would have returned then.
+</p>
+
+<div class="panel">
+  <form class="row" hx-get="/results" hx-target="#results" hx-swap="innerHTML"
+        hx-push-url="false" hx-trigger="submit, change from:#as_of">
+    <input type="text" name="q" id="q" value="{{ q }}" autocomplete="off"
+           placeholder="roe > 15 and pe < 25 and debt_to_equity < 1">
+    <select name="as_of" id="as_of" title="Point-in-time vintage">
+      <option value="">Today (live)</option>
+      {% for v in vintages %}
+        <option value="{{ v }}" {% if v == as_of %}selected{% endif %}>As of {{ v }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="order" value="{{ order }}">
+    <input type="hidden" name="dir" value="{{ dir }}">
+    <input type="hidden" name="limit" value="{{ limit }}">
+    <button type="submit">Run</button>
+  </form>
+
+  <div class="chips">
+    {% for label, query in examples %}
+      <span class="chip"
+            onclick="document.getElementById('q').value={{ query|tojson }};
+                     htmx.trigger(document.querySelector('form'),'submit')">
+        {{ label }}
+      </span>
+    {% endfor %}
+  </div>
+
+  {% if not vintages %}
+    <div class="note">
+      No historical vintages built yet. Run
+      <code>python -m screener.cli history --from 2021-01-01</code>
+      to enable point-in-time screening — the same query replayed against a past
+      date, using only filings that existed then.
+    </div>
+  {% endif %}
+</div>
+
+<h2>Results</h2>
+<div id="results">
+  {% include "_results.html" %}
+</div>
+
+<h2>Query syntax</h2>
+<div class="panel">
+  <p class="muted" style="margin-top:0;font-size:13px">
+    Comparisons joined by <code>and</code> / <code>or</code>. Numbers accept
+    <code>k</code> <code>m</code> <code>b</code> <code>t</code> suffixes.
+    Fields are allowlisted — anything not on this list is rejected before it
+    reaches the database.
+  </p>
+  <div class="row" style="gap:6px">
+    {% for f in fields %}<span class="pill">{{ f }}</span>{% endfor %}
+  </div>
+</div>
+{% endblock %}

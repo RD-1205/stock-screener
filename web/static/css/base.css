@@ -1,0 +1,524 @@
+/* ==========================================================================
+   Base elements and shared components.
+
+   Depends on tokens.css. No raw colour values below this line — if you find
+   yourself typing a hex, add a token instead.
+
+   Legacy class names (.panel, .stat, .chip, .pill, .note, .err, .empty,
+   .bar-bg, .bar-fg, .chart) are preserved deliberately so the existing
+   screener, company and coverage templates keep working while we migrate
+   page by page.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Numbers must never jitter between rows. This is the single highest-impact
+   line in the file for making financial data look trustworthy. */
+.num, td, th, .mono, code, kbd, pre, .stat .v, input[type="text"], select {
+  font-variant-numeric: tabular-nums;
+}
+.mono, code, kbd, pre { font-family: var(--font-mono); }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: var(--fw-medium); line-height: var(--lh-tight); }
+h1 { font-size: var(--fs-xl); letter-spacing: -.01em; }
+h2 {
+  font-size: var(--fs-sm); color: var(--text-2); text-transform: uppercase;
+  letter-spacing: var(--tracking-wide); font-weight: var(--fw-bold);
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+h3 { font-size: var(--fs-lg); }
+p { margin: 0 0 var(--sp-3); }
+
+.sub { color: var(--text-2); font-size: var(--fs-md); margin: 0 0 var(--sp-5); }
+.muted { color: var(--text-2); }
+.dim { color: var(--text-3); }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* --------------------------------------------------------------- skip link */
+.skip-link {
+  position: absolute; left: var(--sp-3); top: -60px; z-index: 100;
+  background: var(--surface-2); color: var(--text-1);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-4); transition: top var(--dur-fast) var(--ease);
+}
+.skip-link:focus { top: var(--sp-3); text-decoration: none; }
+
+/* ------------------------------------------------------------------ header */
+.site-header {
+  position: sticky; top: 0; z-index: 50;
+  height: var(--header-h);
+  display: flex; align-items: center; gap: var(--sp-5);
+  padding: 0 var(--sp-5);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  font-weight: var(--fw-bold); font-size: var(--fs-lg);
+  letter-spacing: -.02em; color: var(--text-1); white-space: nowrap;
+}
+.brand:hover { text-decoration: none; }
+.brand .dot { color: var(--accent); }
+
+.site-nav { display: flex; gap: var(--sp-4); font-size: var(--fs-md); }
+.site-nav a { color: var(--text-2); padding: var(--sp-1) 0; }
+.site-nav a:hover { color: var(--text-1); text-decoration: none; }
+.site-nav a[aria-current="page"] {
+  color: var(--text-1); box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.header-right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
+
+.search-trigger {
+  display: flex; align-items: center; gap: var(--sp-2);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-2) var(--sp-3);
+  color: var(--text-3); font-size: var(--fs-sm); cursor: pointer;
+  min-width: 190px; font-family: inherit;
+}
+.search-trigger:hover { border-color: var(--border-strong); color: var(--text-2); }
+.kbd {
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 1px 5px; color: var(--text-3); margin-left: auto;
+}
+
+.icon-btn {
+  background: transparent; border: 1px solid transparent; color: var(--text-2);
+  border-radius: var(--radius); padding: var(--sp-2); cursor: pointer;
+  line-height: 1; font-size: var(--fs-base); font-family: inherit;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text-1); }
+
+/* -------------------------------------------------------- ticker tape belt
+
+   Hangs directly under the header, full width, on every page.
+
+   Deliberately NOT sticky. The header is already 56px of permanent chrome;
+   pinning another 34px would cost 90px on every screen, which is a lot to
+   give a decorative strip on a data-dense page. It scrolls away with the
+   content and that's correct -- the tape is supplementary by design (R5), so
+   nothing on it may appear only there.
+
+   The scroll is a CSS transform on a duplicated list. transform is
+   GPU-composited, so this costs no main-thread work; a JS-driven scroll would
+   burn frames and stutter whenever the page is busy.
+   -------------------------------------------------------------------------- */
+.tape {
+  position: relative;
+  display: flex; align-items: stretch;
+  height: 34px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  font-size: var(--fs-sm);
+}
+
+.tape-viewport { flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center; }
+
+.tape-track {
+  display: flex; align-items: center; gap: var(--sp-5);
+  width: max-content; padding-left: var(--sp-4);
+  animation: tape-scroll var(--tape-duration, 60s) linear infinite;
+  will-change: transform;
+}
+
+@keyframes tape-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Pause on hover AND on keyboard focus. This is the mechanism that replaces
+   the pause button we dropped -- someone reading or tabbing to an item can
+   stop it without a control. */
+.tape:hover .tape-track,
+.tape:focus-within .tape-track { animation-play-state: paused; }
+
+.tape-item {
+  display: inline-flex; align-items: baseline; gap: var(--sp-2);
+  white-space: nowrap; color: var(--text-1);
+  font-family: var(--font-mono); text-decoration: none;
+}
+.tape-item:hover { text-decoration: none; }
+.tape-item:hover .tape-sym { color: var(--accent); }
+.tape-sym { font-weight: var(--fw-medium); }
+.tape-px { color: var(--text-2); }
+.tape-chg { font-size: var(--fs-xs); }
+.tape-chg.up { color: var(--up); }
+.tape-chg.down { color: var(--down); }
+
+/* A brief tint when a price changes under the scroll -- noticeable without
+   pulling the eye away from whatever the reader was doing. */
+.tape-item.flash-up  { background: var(--up-bg); }
+.tape-item.flash-down { background: var(--down-bg); }
+.tape-item.flash-up, .tape-item.flash-down {
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-slow) var(--ease);
+}
+
+.tape-label {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0 var(--sp-3); flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-3); font-size: var(--fs-2xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-wide);
+  white-space: nowrap;
+}
+
+/* Fade the leading edge so items enter rather than pop into existence. */
+.tape-viewport::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 28px;
+  background: linear-gradient(90deg, var(--surface-2), transparent);
+  pointer-events: none; z-index: 1;
+}
+
+/* Reduced motion: no animation at all, and the strip becomes a normal
+   horizontally-scrollable list so every item is still reachable. */
+@media (prefers-reduced-motion: reduce) {
+  .tape-track { animation: none; padding-left: var(--sp-4); }
+  .tape-viewport { overflow-x: auto; }
+  .tape-track > [aria-hidden="true"] { display: none; }
+}
+[data-motion="reduce"] .tape-track { animation: none; }
+[data-motion="reduce"] .tape-viewport { overflow-x: auto; }
+[data-motion="reduce"] .tape-track > [aria-hidden="true"] { display: none; }
+
+@media (max-width: 760px) {
+  .tape-label span:first-child { display: none; }
+}
+
+/* -------------------------------------------------------------------- main */
+main { max-width: var(--max-w); margin: 0 auto; padding: var(--sp-5); }
+main.prose { max-width: var(--max-w-prose); }
+main.prose p, main.prose li { color: var(--text-2); line-height: var(--lh-loose); }
+main.prose h2 {
+  text-transform: none; letter-spacing: normal; font-size: var(--fs-lg);
+  color: var(--text-1); margin-top: var(--sp-7);
+}
+main.prose h3 { font-size: var(--fs-base); margin-top: var(--sp-5); }
+main.prose ul { padding-left: var(--sp-5); }
+main.prose li { margin-bottom: var(--sp-2); }
+
+/* -------------------------------------------------------------- containers */
+.panel {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--sp-4);
+}
+.row { display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: center; }
+.grid {
+  display: grid; gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+}
+.stat {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+}
+.stat .k {
+  color: var(--text-2); font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-wide); margin-bottom: 3px;
+}
+.stat .v { font-size: var(--fs-lg); font-family: var(--font-mono); }
+
+/* ------------------------------------------------------------------- forms */
+input[type="text"], input[type="search"], input[type="email"], select, textarea {
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-1); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3); font-size: var(--fs-md);
+  font-family: var(--font-mono);
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg);
+}
+input::placeholder { color: var(--text-3); }
+
+button, .btn {
+  background: var(--accent); border: 1px solid transparent; color: var(--accent-fg);
+  font-weight: var(--fw-medium); border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-4); font-size: var(--fs-md); cursor: pointer;
+  font-family: var(--font-sans); transition: background var(--dur-fast) var(--ease);
+}
+button:hover, .btn:hover { background: var(--accent-hov); text-decoration: none; }
+.btn-secondary {
+  background: var(--surface-2); color: var(--text-1); border-color: var(--border-strong);
+}
+.btn-secondary:hover { background: var(--surface-3); }
+
+.chips { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.chip {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+  border-radius: var(--radius-pill); padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-sm); cursor: pointer; font-family: inherit;
+}
+.chip:hover { border-color: var(--accent-border); color: var(--text-1); }
+
+.pill {
+  display: inline-block;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px var(--sp-2);
+  font-size: var(--fs-xs); color: var(--text-2); font-family: var(--font-mono);
+}
+.pill-accent {
+  background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ tables */
+table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+th {
+  text-align: right; padding: var(--cell-pad-y) var(--cell-pad-x);
+  border-bottom: 1px solid var(--border); color: var(--text-2);
+  font-weight: var(--fw-bold); font-size: var(--fs-xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-wide); white-space: nowrap;
+}
+th:first-child, th:nth-child(2), td:first-child, td:nth-child(2) { text-align: left; }
+th a { color: inherit; }
+td {
+  padding: var(--cell-pad-y) var(--cell-pad-x);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right; font-family: var(--font-mono);
+}
+td:nth-child(2) {
+  font-family: var(--font-sans); color: var(--text-2);
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+tbody tr:hover { background: var(--surface-2); }
+
+/* ------------------------------------------------- key stats (no boxes)
+
+   Replaces the card grid on the company page. Cards give every metric equal
+   visual weight and equal padding, which turns 9 numbers into 9 things to
+   read. A dense label/value rail scans in one pass -- your eye lands on the
+   values because they're the only bold, mono, light-coloured things in the
+   row, and the dividers do the grouping that boxes used to.
+   -------------------------------------------------------------------------- */
+.keystats {
+  display: flex; flex-wrap: wrap;
+  gap: 0 var(--sp-5);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-5);
+}
+.keystat {
+  display: flex; align-items: baseline; gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  white-space: nowrap;
+}
+.keystat + .keystat { position: relative; }
+.keystat + .keystat::before {
+  content: ""; position: absolute; left: calc(var(--sp-5) / -2);
+  top: 20%; bottom: 20%; width: 1px; background: var(--border);
+}
+.keystat .k {
+  color: var(--text-3); font-size: var(--fs-xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-wide);
+}
+.keystat .v {
+  font-family: var(--font-mono); font-size: var(--fs-base);
+  color: var(--text-1); font-variant-numeric: tabular-nums;
+}
+.keystat .v.dim { color: var(--text-3); }
+
+/* ------------------------------------------------------- financial tables */
+.fin-table th:first-child, .fin-table td:first-child {
+  text-align: left; font-family: var(--font-sans);
+  position: sticky; left: 0; background: var(--surface-1); z-index: 1;
+}
+.fin-table thead th:first-child { z-index: 2; }
+.fin-table td { white-space: nowrap; }
+
+/* Growth sits under its value in the same cell, small and coloured. Putting
+   it in a separate column doubles the table width for one derived number. */
+.g {
+  display: block; font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums; margin-top: 1px;
+}
+.g.up { color: var(--up); }
+.g.down { color: var(--down); }
+.g.flat { color: var(--text-3); }
+
+.seg-toggle { display: flex; gap: var(--sp-1); }
+.seg-toggle button {
+  background: var(--surface-2); color: var(--text-2);
+  border: 1px solid var(--border); font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-sm);
+  font-weight: var(--fw-normal);
+}
+.seg-toggle button[aria-pressed="true"] {
+  background: var(--accent-bg); color: var(--accent);
+  border-color: var(--accent-border); font-weight: var(--fw-medium);
+}
+.seg-toggle button:hover { color: var(--text-1); }
+
+/* --------------------------------------------------------- section nav */
+.subnav {
+  display: flex; gap: var(--sp-4); flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-5); padding-bottom: var(--sp-2);
+  font-size: var(--fs-md);
+}
+.subnav a { color: var(--text-2); padding-bottom: var(--sp-2); }
+.subnav a:hover { color: var(--text-1); text-decoration: none; }
+
+/* ------------------------------------------------------------------ states */
+.state {
+  border-radius: var(--radius-lg); padding: var(--sp-6) var(--sp-4);
+  text-align: center; color: var(--text-2); font-size: var(--fs-md);
+}
+.state-title { color: var(--text-1); font-size: var(--fs-base); margin-bottom: var(--sp-2); }
+.state-action { margin-top: var(--sp-4); }
+
+.err, .state-error {
+  background: var(--down-bg); border: 1px solid var(--down); color: var(--down);
+  border-radius: var(--radius); padding: var(--sp-3);
+  font-size: var(--fs-md); font-family: var(--font-mono);
+}
+.empty { color: var(--text-2); padding: var(--sp-6); text-align: center; }
+
+.note {
+  border-left: 2px solid var(--accent); border-radius: 0;
+  padding: var(--sp-2) 0 var(--sp-2) var(--sp-3);
+  color: var(--text-2); font-size: var(--fs-md); margin: var(--sp-3) 0;
+}
+.banner-warn {
+  background: var(--warn-bg); border: 1px solid var(--accent-border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  font-size: var(--fs-md); color: var(--text-2);
+}
+
+/* Skeletons must match the size of what they replace, or you trade a spinner
+   for layout shift, which reads worse. */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+.skeleton-row { height: var(--row-h); margin-bottom: var(--sp-1); }
+.skeleton-text { height: 12px; }
+
+/* ------------------------------------------------------------------ charts */
+.bar-bg { background: var(--surface-3); border-radius: 3px; height: 7px; overflow: hidden; }
+.bar-fg { background: var(--accent); height: 100%; }
+.chart .bar { fill: var(--accent); opacity: .78; }
+.chart .bar:hover { opacity: 1; }
+.chart .lbl {
+  fill: var(--text-2); font-size: var(--fs-2xs);
+  text-anchor: middle; font-family: var(--font-mono);
+}
+
+/* -------------------------------------------------------------------- htmx */
+.htmx-request .htmx-indicator { opacity: 1; }
+.htmx-indicator { opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.htmx-request #results, .htmx-request .swap-target {
+  opacity: .45; transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* ------------------------------------------------------------------ footer */
+.site-footer {
+  border-top: 1px solid var(--border); margin-top: var(--sp-8);
+  padding: var(--sp-6) var(--sp-5); background: var(--surface-1);
+}
+.footer-inner { max-width: var(--max-w); margin: 0 auto; }
+.footer-cols {
+  display: grid; gap: var(--sp-5);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: var(--sp-6);
+}
+.footer-cols h3 {
+  font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-wide); color: var(--text-3);
+  margin-bottom: var(--sp-3); font-weight: var(--fw-bold);
+}
+.footer-cols ul { list-style: none; margin: 0; padding: 0; }
+.footer-cols li { margin-bottom: var(--sp-2); }
+.footer-cols a { color: var(--text-2); font-size: var(--fs-sm); }
+.footer-cols a:hover { color: var(--text-1); }
+.footer-bottom {
+  border-top: 1px solid var(--border); padding-top: var(--sp-4);
+  display: flex; gap: var(--sp-4); flex-wrap: wrap; align-items: center;
+  font-size: var(--fs-sm); color: var(--text-3);
+}
+.footer-bottom a { color: var(--text-3); }
+.disclaimer { max-width: 640px; }
+
+/* ------------------------------------------------------------------ mobile */
+@media (max-width: 760px) {
+  .site-header { gap: var(--sp-3); padding: 0 var(--sp-3); }
+  .site-nav { display: none; }
+  .search-trigger { min-width: 0; }
+  .search-trigger .kbd { display: none; }
+  main { padding: var(--sp-4) var(--sp-3); }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+/* ------------------------------------------------------------ browse menu
+
+   Sidebar + results. The menu is a persistent rail rather than a row of
+   dropdowns because the filters compose -- sector AND size AND index -- and
+   dropdowns hide what's currently applied.
+   -------------------------------------------------------------------------- */
+.browse { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--sp-5); }
+.browse-menu { font-size: var(--fs-md); }
+.browse-group { margin-bottom: var(--sp-5); }
+.browse-group h3 {
+  font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-wide); color: var(--text-3);
+  margin-bottom: var(--sp-2); font-weight: var(--fw-bold);
+}
+.browse-group ul { list-style: none; margin: 0; padding: 0; }
+.browse-group li { margin-bottom: 2px; }
+.browse-group a {
+  display: flex; justify-content: space-between; gap: var(--sp-2);
+  color: var(--text-2); padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+.browse-group a:hover { background: var(--surface-2); color: var(--text-1); text-decoration: none; }
+.browse-group a[aria-current="true"] {
+  background: var(--accent-bg); color: var(--accent); font-weight: var(--fw-medium);
+}
+.browse-group .cnt { color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.browse-group a.clear { color: var(--text-3); font-size: var(--fs-sm); }
+
+.alpha { display: flex; flex-wrap: wrap; gap: 2px; }
+.alpha a {
+  display: block; width: 24px; text-align: center;
+  padding: 2px 0; font-family: var(--font-mono); font-size: var(--fs-sm);
+}
+.alpha a[aria-current="true"] { background: var(--accent-bg); color: var(--accent); }
+
+@media (max-width: 860px) {
+  .browse { grid-template-columns: 1fr; }
+  .browse-menu {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--sp-4); padding-bottom: var(--sp-4);
+    border-bottom: 1px solid var(--border);
+  }
+}

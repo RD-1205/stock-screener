@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% from "_partials/states.html" import empty %}
+{% block title %}{{ heading }} — {{ site_name }}{% endblock %}
+{% block description %}Browse US companies by sector, size, index membership or activity. Fundamentals from SEC EDGAR filings.{% endblock %}
+
+{% block content %}
+<h1>{{ heading }}</h1>
+<p class="sub">{{ "{:,}".format(data.total) }} companies{% if subtitle %} · {{ subtitle }}{% endif %}</p>
+
+<div class="browse">
+  <aside class="browse-menu">
+    <div class="browse-group">
+      <h3>Activity</h3>
+      <ul>
+        {% for slug, (label, _) in sorts.items() if slug in ('active','gainers','losers','mcap') %}
+          <li><a href="{{ url_with(sort=slug) }}" {% if sort == slug %}aria-current="true"{% endif %}>{{ label }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {% if indexes %}
+    <div class="browse-group">
+      <h3>Index</h3>
+      <ul>
+        {% for i in indexes %}
+          <li><a href="{{ url_with(index=i.slug, page=1) }}" {% if index == i.slug %}aria-current="true"{% endif %}>
+            {{ i.label }} <span class="cnt">{{ i.count }}</span></a></li>
+        {% endfor %}
+        {% if index %}<li><a href="{{ url_with(index='', page=1) }}" class="clear">Clear index</a></li>{% endif %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div class="browse-group">
+      <h3>Sector</h3>
+      <ul>
+        {% for s in sectors %}
+          <li><a href="{{ url_with(sector=s.slug, page=1) }}" {% if sector == s.slug %}aria-current="true"{% endif %}>
+            {{ s.label }} <span class="cnt">{{ s.count }}</span></a></li>
+        {% endfor %}
+        {% if sector %}<li><a href="{{ url_with(sector='', page=1) }}" class="clear">Clear sector</a></li>{% endif %}
+      </ul>
+    </div>
+
+    <div class="browse-group">
+      <h3>Size</h3>
+      <ul>
+        {% for b in bands %}
+          <li><a href="{{ url_with(band=b.slug, page=1) }}" {% if band == b.slug %}aria-current="true"{% endif %}>
+            {{ b.label }} <span class="cnt">{{ b.count }}</span></a></li>
+        {% endfor %}
+        {% if band %}<li><a href="{{ url_with(band='', page=1) }}" class="clear">Clear size</a></li>{% endif %}
+      </ul>
+    </div>
+
+    <div class="browse-group">
+      <h3>Alphabetical</h3>
+      <div class="alpha">
+        {% for l in letters %}
+          <a href="{{ url_with(letter=l, page=1) }}" {% if letter == l %}aria-current="true"{% endif %}>{{ l }}</a>
+        {% endfor %}
+      </div>
+      {% if letter %}<a href="{{ url_with(letter='', page=1) }}" class="clear">Clear letter</a>{% endif %}
+    </div>
+  </aside>
+
+  <div class="browse-results">
+    {% if active_filters %}
+      <div class="row" style="margin-bottom:var(--sp-3);gap:var(--sp-2)">
+        {% for label, href in active_filters %}
+          <a class="pill pill-accent" href="{{ href }}">{{ label }} ✕</a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if data.rows %}
+      <div class="panel table-scroll" style="padding:0;overflow:hidden">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th><th>Company</th>
+              <th style="text-align:left">Sector</th>
+              <th>Price</th><th>Change</th><th>Volume</th>
+              <th>Mkt cap</th><th>P/E</th><th>ROE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in data.rows %}
+              <tr>
+                <td><a href="/stocks/{{ r.ticker }}">{{ r.ticker }}</a></td>
+                <td>{{ r.name or '—' }}</td>
+                <td style="text-align:left;font-family:var(--font-sans);color:var(--text-2)">{{ r.sector }}</td>
+                <td>{{ render_cell(r.price, 'num') }}</td>
+                <td class="{{ 'up' if (r.change_pct or 0) > 0 else ('down' if (r.change_pct or 0) < 0 else '') }}">
+                  {% if r.change_pct is not none %}{{ '%+.2f'|format(r.change_pct) }}%{% else %}—{% endif %}
+                </td>
+                <td>{{ render_cell(r.volume, 'money') }}</td>
+                <td>{{ render_cell(r.market_cap, 'money') }}</td>
+                <td>{{ render_cell(r.pe, 'num') }}</td>
+                <td>{{ render_cell(r.roe, 'pct') }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if data.pages > 1 %}
+        <nav class="row" style="margin-top:var(--sp-4);justify-content:center" aria-label="Pagination">
+          {% if data.page > 1 %}<a class="btn btn-secondary" href="{{ url_with(page=data.page-1) }}">Previous</a>{% endif %}
+          <span class="dim mono" style="font-size:var(--fs-sm)">Page {{ data.page }} of {{ data.pages }}</span>
+          {% if data.page < data.pages %}<a class="btn btn-secondary" href="{{ url_with(page=data.page+1) }}">Next</a>{% endif %}
+        </nav>
+      {% endif %}
+
+      <p class="dim" style="font-size:var(--fs-sm);margin-top:var(--sp-3)">
+        Volume and change are from the last close we hold, not intraday.
+      </p>
+    {% else %}
+      {{ empty("Nothing matches these filters", "Try clearing one.", "/stocks", "Show all companies") }}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

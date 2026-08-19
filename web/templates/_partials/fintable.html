@@ -1,0 +1,44 @@
+{#
+  One financial table: metrics down the side, periods across the top.
+
+  Growth renders inside the value cell rather than in its own column -- a
+  separate column doubles the table width for a derived number, and at ten
+  periods that pushes the whole thing off screen.
+#}
+{% macro fintable(data, growth="yoy", caption="") %}
+  {% if data.periods %}
+    <div class="table-scroll">
+      <table class="fin-table">
+        {% if caption %}<caption class="sr-only">{{ caption }}</caption>{% endif %}
+        <thead>
+          <tr>
+            <th scope="col">Metric</th>
+            {% for p in data.periods %}
+              <th scope="col">
+                {% if data.period_type == 'Q' %}{{ p[:7] }}{% else %}{{ p[:4] }}{% endif %}
+              </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in data.rows %}
+            <tr>
+              <th scope="row" style="font-weight:var(--fw-normal)">{{ row.label }}</th>
+              {% for v in row.vals %}
+                {% set g = row[growth][loop.index0] if growth and row[growth] else none %}
+                <td>
+                  {{ render_cell(v, row.kind) }}
+                  {% if g is not none %}
+                    <span class="g {{ 'up' if g > 0.05 else ('down' if g < -0.05 else 'flat') }}">
+                      {{ '+' if g > 0 else '' }}{{ '%.1f'|format(g) }}%
+                    </span>
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endmacro %}

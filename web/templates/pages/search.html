@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_partials/states.html" import empty %}
+{% block title %}{% if q %}{{ q }} — search{% else %}Search{% endif %} — {{ site_name }}{% endblock %}
+
+{% block content %}
+<h1>Search</h1>
+
+<form action="/search" method="get" role="search" class="row" style="margin:var(--sp-4) 0 var(--sp-5)">
+  <input type="search" name="q" value="{{ q }}" data-search-input autocomplete="off"
+         placeholder="Company name or ticker" aria-label="Search companies"
+         style="flex:1;min-width:240px;font-size:var(--fs-base);padding:var(--sp-3)">
+  <button type="submit">Search</button>
+</form>
+
+{% if q and rows %}
+  <p class="sub">{{ rows|length }} result{{ '' if rows|length == 1 else 's' }} for “{{ q }}”</p>
+  <div class="panel table-scroll" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th>Ticker</th><th>Company</th><th style="text-align:left">Industry</th>
+                 <th>Market cap</th><th>Price</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><a href="/stocks/{{ r['ticker'] }}">{{ r['ticker'] }}</a></td>
+            <td>{{ r['name'] or '—' }}</td>
+            <td style="text-align:left;font-family:var(--font-sans);color:var(--text-2)">
+              {{ r['sic_description'] or '—' }}</td>
+            <td>{{ render_cell(r['market_cap'], 'money') }}</td>
+            <td>{{ render_cell(r['price'], 'num') }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% elif q %}
+  {{ empty("No companies match “" ~ q ~ "”",
+           "Check the spelling, or browse the full list.",
+           "/stocks", "Browse all companies") }}
+{% else %}
+  {{ empty("Search for a company",
+           "Type a ticker like AAPL, or a company name.",
+           "/stocks", "Browse all companies") }}
+{% endif %}
+{% endblock %}
