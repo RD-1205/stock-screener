@@ -94,7 +94,7 @@ def test_footer_links_are_real():
     """The footer is how ~5,000 company pages get discovered."""
     html = client().get("/").text
     for href in ("/methodology", "/terms", "/privacy", "/disclaimer",
-                 "/stocks", "/screens", "/feed.rss"):
+                 "/stocks", "/screens", "/lists"):
         assert f'href="{href}"' in html, f"footer missing {href}"
     assert 'href="/stocks/MODT"' in html, "no company links in footer"
     assert "Not investment advice" in html

@@ -27,7 +27,6 @@ var m=s.getItem('ui.motion');if(m)r.setAttribute('data-motion',m);}catch(e){}})(
 <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
 {% block styles %}{% endblock %}
 
-<link rel="alternate" type="application/rss+xml" title="{{ site_name }} filing news" href="/feed.rss">
 <link rel="search" type="application/opensearchdescription+xml" title="{{ site_name }}" href="/opensearch.xml">
 {% if noindex %}<meta name="robots" content="noindex, follow">{% endif %}
 

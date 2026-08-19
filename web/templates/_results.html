@@ -24,7 +24,7 @@
           {% for key, label, kind in cols %}
             <td>
               {% if key == 'ticker' %}
-                <a href="/company/{{ r['ticker'] }}">{{ r['ticker'] }}</a>
+                <a href="/stocks/{{ r['ticker'] }}">{{ r['ticker'] }}</a>
               {% else %}
                 {{ render_cell(r[key], kind) }}
               {% endif %}

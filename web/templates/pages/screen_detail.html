@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ label }} — {{ site_name }}{% endblock %}
+{% block description %}{{ label }}: a live stock screen ({{ query }}) run against SEC EDGAR fundamentals. {{ rows|length }} companies match today.{% endblock %}
+
+{% block content %}
+<h1>{{ label }}</h1>
+<p class="sub">
+  Live results for <code class="mono">{{ query }}</code>, run against today's
+  data. Every figure traces back to an SEC filing.
+</p>
+
+<div class="panel">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <code class="mono" style="font-size:var(--fs-sm);color:var(--text-2)">{{ query }}</code>
+    <a class="btn btn-secondary" href="/screener?q={{ query|urlencode }}">Edit in screener</a>
+  </div>
+</div>
+
+<div id="results">
+  {% include "_results.html" %}
+</div>
+{% endblock %}
