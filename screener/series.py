@@ -13,12 +13,17 @@ server-side is a few lines and cuts the payload by more than half.
 from datetime import date, timedelta
 
 # range key -> (days back or None for everything, bucket)
+#
+# No "1d" -- prices are end-of-day only (no intraday data), so a single
+# calendar day is at most one point. That's not a chart, and faking one would
+# violate the "no fake data" rule the rest of this app follows. "5d" is the
+# shortest range that's honestly drawable.
 RANGES = {
+    "5d":  (10,    "day"),
     "1m":  (31,    "day"),
     "6m":  (183,   "day"),
     "1y":  (366,   "day"),
     "5y":  (1827,  "week"),
-    "10y": (3653,  "week"),
     "max": (None,  "month"),
 }
 DEFAULT_RANGE = "1y"

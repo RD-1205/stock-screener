@@ -161,7 +161,7 @@ def test_company_header_shows_price_and_source():
     html = c.get("/stocks/MODT").text
     assert "At close" in html, "price source label missing from header"
     assert "data-chart-legend" in html and "data-chart-canvas" in html
-    for r in ("1m", "6m", "1y", "5y", "10y", "max"):
+    for r in ("5d", "1m", "6m", "1y", "5y", "max"):
         assert f'data-range="{r}"' in html, f"range {r} missing"
     assert 'data-range="1y"\n                aria-pressed="true"' in html or \
            'aria-pressed="true"' in html, "no default range selected"

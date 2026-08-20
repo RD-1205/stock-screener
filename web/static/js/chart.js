@@ -32,40 +32,93 @@
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
+  // Lightweight Charts' "business day" mode (plain 'YYYY-MM-DD' strings)
+  // treats every provided point as one evenly-spaced slot, regardless of how
+  // many real days separate it from the next one. That's fine for unbroken
+  // daily data, but our 5y/max ranges are downsampled to one point a week or
+  // month -- with real, uneven gaps between them (holidays, missing data) --
+  // so business-day mode drew them as if evenly spaced, which is what made
+  // the long ranges look compressed/warped instead of a clean timeline.
+  // UTCTimestamp mode fixes that: positions and tick marks (including the
+  // "just show the year" labels at wide zoom) are genuinely time-linear.
+  function toUnixTime(iso) {
+    return Math.floor(Date.parse(iso + "T00:00:00Z") / 1000);
+  }
+
   function fmtPrice(v) {
-    return v == null ? "—" : v.toLocaleString(undefined, {
+    return v == null ? "—" : "$" + v.toLocaleString(undefined, {
       minimumFractionDigits: 2, maximumFractionDigits: 2
     });
   }
 
+  function fmtSignedMoney(v) {
+    if (v == null) return "—";
+    var sign = v >= 0 ? "+" : "-";
+    return sign + "$" + Math.abs(v).toLocaleString(undefined, {
+      minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+  }
+
+  function fmtSignedPct(v) {
+    if (v == null) return "";
+    var sign = v >= 0 ? "+" : "-";
+    return "(" + sign + Math.abs(v).toFixed(2) + "%)";
+  }
+
+  function fmtDate(iso) {
+    var d = new Date(iso + "T00:00:00Z");
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+  }
+
   function init(root) {
     var ticker = root.dataset.chart;
-    var legend = root.querySelector("[data-chart-legend]");
-    var canvas = root.querySelector("[data-chart-canvas]");
+    var priceEl = root.querySelector("[data-legend-price]");
+    var changeEl = root.querySelector("[data-legend-change]");
+    var dateEl = root.querySelector("[data-legend-date]");
     var status = root.querySelector("[data-chart-status]");
+    var canvas = root.querySelector("[data-chart-canvas]");
     var buttons = root.querySelectorAll("[data-range]");
     var chart, line, controller;
+    var firstValue = null;     // period-start price, so any hovered point can
+                                // show "vs start of range" like the idle summary does
 
     function setStatus(msg) {
       if (status) { status.textContent = msg || ""; status.hidden = !msg; }
     }
 
+    function setLegend(price, change, changePct, dateLabel) {
+      if (priceEl) priceEl.textContent = fmtPrice(price);
+      if (changeEl) {
+        changeEl.textContent = change == null ? ""
+          : fmtSignedMoney(change) + " " + fmtSignedPct(changePct);
+        changeEl.classList.toggle("up", change != null && change >= 0);
+        changeEl.classList.toggle("down", change != null && change < 0);
+      }
+      if (dateEl) dateEl.textContent = dateLabel || "";
+    }
+
     function build() {
       chart = LightweightCharts.createChart(canvas, {
-        height: 320,
         autoSize: true,
         layout: {
           background: { type: "solid", color: "transparent" },
           textColor: css("--text-2"),
-          fontFamily: css("--font-mono") || "monospace",
-          fontSize: 11
+          fontFamily: css("--font-sans"),
+          fontSize: 12
         },
         grid: {
           vertLines: { visible: false },
           horzLines: { color: css("--border-subtle") }
         },
-        rightPriceScale: { borderColor: css("--border") },
-        timeScale: { borderColor: css("--border"), fixLeftEdge: true, fixRightEdge: true },
+        rightPriceScale: { visible: false },
+        leftPriceScale: {
+          visible: true, borderColor: css("--border"),
+          scaleMargins: { top: 0.10, bottom: 0.08 }
+        },
+        timeScale: {
+          borderColor: css("--border"), fixLeftEdge: true, fixRightEdge: true,
+          timeVisible: false, secondsVisible: false
+        },
         crosshair: {
           mode: LightweightCharts.CrosshairMode.Magnet,
           vertLine: { color: css("--text-3"), width: 1, style: 2, labelBackgroundColor: css("--surface-3") },
@@ -81,21 +134,32 @@
         bottomColor: "transparent",
         lineWidth: 2,
         priceLineVisible: false,
-        lastValueVisible: false
+        lastValueVisible: false,
+        priceScaleId: "left"
       });
 
       // Crosshair drives the legend, so the number under the cursor is always
-      // the number being read. Without this a chart is decorative.
+      // the number being read, framed the same way as the idle state (change
+      // vs. the start of the visible range) rather than switching metaphors.
+      // param.time is a raw UTCTimestamp (seconds) in this mode, not an
+      // object -- format it straight from that, in UTC, so the date shown
+      // matches the trading day the point was stored under, not whatever the
+      // viewer's local timezone rolls it into.
       chart.subscribeCrosshairMove(function (param) {
-        if (!legend) return;
         if (!param.time || !param.seriesData || !param.seriesData.get(line)) {
-          legend.textContent = legend.dataset.summary || "";
+          setLegend(idle.price, idle.change, idle.changePct, idle.dateLabel);
           return;
         }
-        var v = param.seriesData.get(line);
-        legend.textContent = param.time + "   " + fmtPrice(v.value);
+        var v = param.seriesData.get(line).value;
+        var change = firstValue != null ? v - firstValue : null;
+        var changePct = firstValue ? (v / firstValue - 1) * 100 : null;
+        var hoverDate = new Date(param.time * 1000).toLocaleDateString(
+          undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+        setLegend(v, change, changePct, hoverDate);
       });
     }
+
+    var idle = { price: null, change: null, changePct: null, dateLabel: "" };
 
     function load(range) {
       setStatus("Loading…");
@@ -110,18 +174,17 @@
         })
         .then(function (d) {
           if (!chart) build();
-          line.setData(d.points.map(function (p) { return { time: p[0], value: p[1] }; }));
+          firstValue = d.points.length ? d.points[0][1] : null;
+          line.setData(d.points.map(function (p) {
+            return { time: toUnixTime(p[0]), value: p[1] };
+          }));
           chart.timeScale().fitContent();
 
-          if (legend) {
-            var pct = d.change_pct;
-            var arrow = pct >= 0 ? "▲" : "▼";
-            var summary = fmtPrice(d.last) + "   " + arrow + " " +
-                          Math.abs(pct).toFixed(2) + "%  over " + d.range;
-            legend.dataset.summary = summary;
-            legend.textContent = summary;
-            legend.style.color = pct >= 0 ? css("--up") : css("--down");
-          }
+          idle = {
+            price: d.last, change: d.change, changePct: d.change_pct,
+            dateLabel: d.last_date ? fmtDate(d.last_date) + "  ·  " + d.range.toUpperCase() : "",
+          };
+          setLegend(idle.price, idle.change, idle.changePct, idle.dateLabel);
           setStatus("");
         })
         .catch(function (err) {
