@@ -96,6 +96,25 @@
     return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
   }
 
+  // The actual bug, finally correctly diagnosed: fitContent() guarantees
+  // every bar is *visible*, not that the bars *fill the panel*. With a
+  // sparse series (13 monthly points on MAX, ~50 on 1y) in a wide box, the
+  // library shows everything at a modest default bar spacing and leaves
+  // the rest of the width empty -- rather than stretching bars to fill it.
+  // That's independent of container size or resize timing, which is why
+  // two rounds of "fix the resize race" didn't move it: the race wasn't
+  // the bug. setVisibleLogicalRange maps a given bar-index range directly
+  // and linearly across the *entire* current pixel width, which is what
+  // "fill the box" actually requires. [-0.5, n-0.5] is the standard trick
+  // for "show exactly these n bars, edge to edge, no matter how few there
+  // are" -- half a bar of padding on each side keeps the first/last point
+  // from sitting flush against the axis lines.
+  function stretchToFill(chart, pointCount) {
+    if (pointCount > 0) {
+      chart.timeScale().setVisibleLogicalRange({ from: -0.5, to: pointCount - 0.5 });
+    }
+  }
+
   function init(root) {
     var ticker = root.dataset.chart;
     var priceEl = root.querySelector("[data-legend-price]");
@@ -107,6 +126,7 @@
     var chart, line, controller;
     var firstValue = null;     // period-start price, so any hovered point can
                                 // show "vs start of range" like the idle summary does
+    var pointCount = 0;        // needed on every resize too, not just on load
 
     function setStatus(msg) {
       if (status) { status.textContent = msg || ""; status.hidden = !msg; }
@@ -180,7 +200,7 @@
         var box = entries[0].contentRect;
         if (box.width > 0 && box.height > 0) {
           chart.resize(box.width, box.height);
-          chart.timeScale().fitContent();
+          stretchToFill(chart, pointCount);
         }
       }).observe(canvas);
 
@@ -224,10 +244,11 @@
             tickMarkFormatter: range === "max" ? yearOnlyTickFormatter : defaultTickFormatter
           } });
           firstValue = d.points.length ? d.points[0][1] : null;
+          pointCount = d.points.length;
           line.setData(d.points.map(function (p) {
             return { time: toUnixTime(p[0]), value: p[1] };
           }));
-          chart.timeScale().fitContent();
+          stretchToFill(chart, pointCount);
 
           idle = {
             price: d.last, change: d.change, changePct: d.change_pct,
