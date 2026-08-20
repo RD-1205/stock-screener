@@ -12,7 +12,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import db, ingest, screen, transform          # noqa: E402
+from screener import db, edgar, ingest, prices, screen, transform  # noqa: E402
 from screener.concepts import resolve                        # noqa: E402
 from tests.make_fixtures import write_all, seed_db           # noqa: E402
 
@@ -292,6 +292,45 @@ def test_suffix_parsing():
     assert params == [2.5e9, 20.0], params
     assert "?" in where and "market_cap" in where
     print("  OK  suffix parsing (2.5b -> 2,500,000,000)")
+
+
+def test_fetch_tickers_keeps_primary_ticker_per_cik():
+    """SEC lists a CIK's common stock first, then any other securities
+    registered under it -- preferred share series, ETFs, stale when-issued
+    tickers from old splits. JPMorgan's CIK alone has 9 entries. Whichever
+    ticker we keep must be the first (primary) one, not the last."""
+    fake_payload = {
+        "0": {"cik_str": 19617, "ticker": "JPM", "title": "JPMORGAN CHASE & CO"},
+        "1": {"cik_str": 19617, "ticker": "JPM-PC", "title": "JPMORGAN CHASE & CO"},
+        "2": {"cik_str": 19617, "ticker": "JPM-PM", "title": "JPMORGAN CHASE & CO"},
+        "3": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
+    }
+    original = edgar.get_json
+    edgar.get_json = lambda url, ua: fake_payload
+    try:
+        rows = edgar.fetch_tickers("test-agent")
+    finally:
+        edgar.get_json = original
+    by_cik = {r["cik"]: r["ticker"] for r in rows}
+    assert by_cik == {19617: "JPM", 320193: "AAPL"}, by_cik
+    print("  OK  multi-security CIK resolves to its primary ticker, not the last one seen")
+
+
+def test_price_csv_drops_truncation_message_row():
+    """EODHD appends a plain-text line when a free-tier date range gets
+    truncated, e.g. 'Data is limited by one year as you have free
+    subscription.' DictReader parses that as a row with the message sitting
+    in the date column -- it must not end up in `prices` as a garbage date."""
+    csv_text = (
+        "Date,Open,High,Low,Close,Adjusted_close,Volume\n"
+        "2026-08-18,307.58,311.49,305.74,310.03,310.03,53424500\n"
+        "2026-08-19,310.13,319.28,309.60,316.83,316.83,50009121\n"
+        "\nData is limited by one year as you have free subscription\n"
+    )
+    rows = prices._parse_ohlcv_csv(csv_text, "AAPL")
+    assert len(rows) == 2, f"expected 2 real rows, got {len(rows)}: {rows}"
+    assert all(r[1].count("-") == 2 and len(r[1]) == 10 for r in rows), rows
+    print("  OK  truncation-message row filtered out, 2 real bars kept")
 
 
 if __name__ == "__main__":
