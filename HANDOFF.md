@@ -253,26 +253,43 @@ indexation rules, crawl traps), `ROADMAP.md` (original build plan).
 
 # 8. What is blocked, and on what
 
-### The one that matters: real data has never been ingested
+### Real data is now in — 65 companies, 285k facts, 20 with price history
 
-Everything runs on 6 synthetic companies. Consequences:
+The first real ingest happened and the pipeline held up. Coverage against real
+filings, which was the big unknown:
 
-- The `concepts.py` tag map has only met 6 filers — **real-world coverage is
-  unknown**. If `operating_cash_flow` resolves at 40% on real filings, the
-  financials tables are mostly dashes and the screener filters on data that
-  isn't there.
-- Every network path (`fetch_tickers`, `fetch_companyfacts`, both price
-  providers) is written and unit-tested but **has never run against a live
-  endpoint**. Expect small fixes on first contact.
-- Only 2 of 5 market-cap bands appear, because all 6 fixtures sit between $7B
-  and $81B.
-- Ratio columns look identical across years because fixtures use constant
-  margins.
+```
+revenue, net_income, total_assets, total_equity, cash    98%
+eps_diluted, shares_diluted, tax_expense, pretax_income  97%
+operating_cash_flow                                      94%
+operating_income, capex                                  85%
+current_assets / liabilities                             83%
+cost_of_revenue, total_liabilities, short_term_debt      77%
+inventory                                                68%
+gross_profit                                             58%   (back-computed)
+short_term_investments                                   54%
+```
 
-**First action for whoever picks this up: get Rudra to run the ingest, then
-open `/coverage`.** That page ranks every metric by resolution rate and is the
-work queue for `concepts.py`. It is worth more than any feature currently in
-the backlog.
+Spot-checked against the filings: Apple FY2021 revenue $365.82B and net income
+$94.68B are both exactly right. **The normalization layer works.**
+
+The low numbers are mostly legitimate absence rather than missed tags — service
+companies hold no inventory, banks report no cost of revenue — but this has not
+been verified, and P6 explains why it currently *can't* be.
+
+**Two real bugs surfaced, both logged in `docs/PENDING-CHANGES.md`:**
+
+- **P5**: per-share metrics break across stock splits. Apple's EPS series has a
+  silent 4x discontinuity between FY2017 and FY2018. Affects 11 of 65
+  companies. The fix is unusually clean — split ratios are recoverable from our
+  own `facts` table because we keep every filed version.
+- **P6**: the ingest filters facts against the tag allowlist *before storing*,
+  so `/coverage` can show which metrics are thin but never which tag the
+  missing companies used. The "work queue" page can't currently produce a work
+  queue.
+
+Still true: only ~20 companies have prices, `snapshot_history` is empty (no
+vintages built yet), and `index_members` is unpopulated.
 
 ### Also blocked
 
