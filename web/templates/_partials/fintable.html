@@ -13,10 +13,8 @@
         <thead>
           <tr>
             <th scope="col">Metric</th>
-            {% for p in data.periods %}
-              <th scope="col">
-                {% if data.period_type == 'Q' %}{{ p[:7] }}{% else %}{{ p[:4] }}{% endif %}
-              </th>
+            {% for p in data.period_labels %}
+              <th scope="col">{{ p }}</th>
             {% endfor %}
           </tr>
         </thead>

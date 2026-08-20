@@ -83,6 +83,28 @@ def periods(conn, cik, period_type, limit=10):
     return [r[0] for r in rows][::-1]          # oldest -> newest for display
 
 
+def fiscal_quarter_label(period_end, fiscal_year_end=None):
+    """'2025-12-27' -> 'Q1 2026' for a company whose fiscal year ends in Sep.
+
+    Calendar quarters (Jan-Mar = Q1, ...) are wrong for a large share of real
+    filers -- Apple's fiscal year ends in September, Microsoft's in June,
+    Nvidia's and Walmart's in January. `companies.fiscal_year_end` ('MMDD',
+    from the SEC submissions API) is exactly the input needed to get this
+    right instead of guessing from the calendar.
+
+    period_end is used for the quarter's END, not its start, which is what
+    both XBRL and everyday usage mean by e.g. "Q1 2026": the three months
+    ending in that quarter, named for the fiscal year they fall in.
+    """
+    year, month = int(period_end[:4]), int(period_end[5:7])
+    fy_end_month = int(fiscal_year_end[:2]) if fiscal_year_end else 12
+    fy_start_month = (fy_end_month % 12) + 1
+
+    fiscal_year = year + 1 if month > fy_end_month else year
+    quarter = ((month - fy_start_month) % 12) // 3 + 1
+    return f"Q{quarter} {fiscal_year}"
+
+
 def _nearest_instant(conn, cik, on_or_before):
     """Balance-sheet value closest to a flow period's end date.
 
@@ -104,7 +126,7 @@ def instants_at(conn, cik, period_end):
     return out
 
 
-def statement(conn, cik, period_type="FY", limit=10):
+def statement(conn, cik, period_type="FY", limit=10, fiscal_year_end=None):
     """Metrics x periods, with YoY (and QoQ for quarters)."""
     cols = periods(conn, cik, period_type, limit)
     if not cols:
@@ -127,7 +149,13 @@ def statement(conn, cik, period_type="FY", limit=10):
         rows.append({"metric": metric, "label": label, "kind": kind,
                      "vals": vals, "yoy": yoy, "qoq": qoq})
 
-    return {"periods": cols, "rows": rows, "period_type": period_type}
+    if period_type == "Q":
+        labels = [fiscal_quarter_label(p, fiscal_year_end) for p in cols]
+    else:
+        labels = [p[:4] for p in cols]
+
+    return {"periods": cols, "period_labels": labels, "rows": rows,
+            "period_type": period_type}
 
 
 def balance_sheet(conn, cik, limit=10):
@@ -153,7 +181,8 @@ def balance_sheet(conn, cik, limit=10):
                for i in range(len(cols))]
         rows.append({"metric": metric, "label": label, "kind": kind,
                      "vals": vals, "yoy": yoy, "qoq": [None] * len(cols)})
-    return {"periods": cols, "rows": rows, "period_type": "INSTANT"}
+    return {"periods": cols, "period_labels": [p[:4] for p in cols],
+            "rows": rows, "period_type": "INSTANT"}
 
 
 def ratios(conn, cik, limit=10):
@@ -223,7 +252,8 @@ def ratios(conn, cik, limit=10):
         rows.append({"metric": name, "label": label, "kind": kind,
                      "vals": vals,
                      "yoy": [None] * len(cols), "qoq": [None] * len(cols)})
-    return {"periods": cols, "rows": rows, "period_type": "FY"}
+    return {"periods": cols, "period_labels": [p[:4] for p in cols],
+            "rows": rows, "period_type": "FY"}
 
 
 def peers(conn, cik, limit=8):

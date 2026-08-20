@@ -74,6 +74,28 @@
     return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
   }
 
+  // MAX can span many years once real price history goes back further than
+  // today's ~1-year provider cap, and at that zoom the library's default
+  // formatter mixes month/day ticks in with year ticks -- fine up close, but
+  // "the big picture" is exactly what should read as a clean year-by-year
+  // timeline. Force every tick to a bare year only for this range.
+  function yearOnlyTickFormatter(time) {
+    return String(new Date(time * 1000).getUTCFullYear());
+  }
+
+  function defaultTickFormatter(time, tickMarkType) {
+    var d = new Date(time * 1000);
+    var TT = LightweightCharts.TickMarkType;
+    if (tickMarkType === TT.Year) return String(d.getUTCFullYear());
+    if (tickMarkType === TT.Month) {
+      return d.toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+    }
+    if (tickMarkType === TT.DayOfMonth) {
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+    }
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  }
+
   function init(root) {
     var ticker = root.dataset.chart;
     var priceEl = root.querySelector("[data-legend-price]");
@@ -121,7 +143,8 @@
         },
         timeScale: {
           borderColor: css("--border"), fixLeftEdge: true, fixRightEdge: true,
-          timeVisible: false, secondsVisible: false
+          timeVisible: false, secondsVisible: false,
+          tickMarkFormatter: defaultTickFormatter
         },
         crosshair: {
           mode: LightweightCharts.CrosshairMode.Magnet,
@@ -141,6 +164,18 @@
         lastValueVisible: false,
         priceScaleId: "left"
       });
+
+      // autoSize's own resize doesn't re-fit the visible range -- it just
+      // resizes the canvas and keeps whatever zoom/offset was already set.
+      // Combined with fitContent() running synchronously right after
+      // setData() (before autoSize's ResizeObserver has even fired once,
+      // especially right after an IntersectionObserver-triggered mount like
+      // this one), the chart fits itself to a stale, often-tiny width, then
+      // grows into its real size with all the new room left as empty space
+      // on one side. Re-fitting on every real resize is the fix.
+      new ResizeObserver(function () {
+        if (line) chart.timeScale().fitContent();
+      }).observe(canvas);
 
       // Crosshair drives the legend, so the number under the cursor is always
       // the number being read, framed the same way as the idle state (change
@@ -178,6 +213,9 @@
         })
         .then(function (d) {
           if (!chart) build();
+          chart.applyOptions({ timeScale: {
+            tickMarkFormatter: range === "max" ? yearOnlyTickFormatter : defaultTickFormatter
+          } });
           firstValue = d.points.length ? d.points[0][1] : null;
           line.setData(d.points.map(function (p) {
             return { time: toUnixTime(p[0]), value: p[1] };
