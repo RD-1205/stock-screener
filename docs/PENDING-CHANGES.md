@@ -183,4 +183,102 @@ The DSL has no `>=` / `<=` distinction problem — both already parse. But
 
 ---
 
+## P5 — Per-share metrics break across stock splits *(correctness bug)*
+
+**Found by the first real ingest.** Not a UI preference — the numbers on the
+company page are currently wrong for any company that has split.
+
+Apple's diluted EPS series renders as:
+
+```
+FY2016  FY2017  FY2018  FY2019  FY2020  FY2021
+  8.31    9.21    2.98    2.97    3.28    5.61
+                  ↑ 4x discontinuity, no split happened between 2017 and 2018
+```
+
+**Why.** Restatement resolution takes the most recently *filed* value per
+period, which is right for revenue and wrong for per-share figures. Apple split
+4-for-1 in Aug 2020. FY2018 and FY2019 still appeared as comparatives in the
+FY2020 10-K, so they were restated to post-split. FY2016 and FY2017 had already
+dropped out of the comparative window, so their newest value is still
+pre-split. The series silently mixes two bases.
+
+Dollar metrics are unaffected — only per-share values restate on a split.
+
+**Blast radius:** the EPS row on every company page, `eps_cagr_3y`, any
+point-in-time EPS comparison spanning a split, and the `eps` field in the
+screener. 11 of 65 ingested companies are affected.
+
+### The fix is unusually clean, because we already hold the evidence
+
+Keeping every filed version — the same property that makes point-in-time work —
+means split factors can be recovered from our own `facts` table. The same
+period, restated across two filings, differs by exactly the split ratio:
+
+```
+AAPL FY2012   44.15 →  6.31   =  7:1   (restated in the 2014-10-27 10-K)
+AAPL FY2018   11.91 →  2.98   =  4:1   (restated in the 2020-10-30 10-K)
+AMZN FY2021   64.81 →  3.24   = 20:1   (restated 2023-02-03)
+NVDA FY2024   11.93 →  1.19   = 10:1   (restated 2025-02-26)
+TSLA FY2021    4.90 →  1.63   =  3:1   (restated 2023-01-31)
+```
+
+27 such events recovered across 11 companies, every ratio exact, with **no
+external corporate-actions feed**.
+
+### Edits
+
+1. New `screener/splits.py`: scan `facts` for same-period restatements of a
+   per-share tag whose ratio is within 3% of a clean split ratio. Emit
+   `(cik, effective_filing_date, ratio)`.
+2. New `splits` table, populated on ingest.
+3. `transform.py`: after resolving a per-share metric, multiply by the
+   cumulative factor of every split recorded *after* that period's last filing.
+   Applies to `eps_basic`, `eps_diluted`, `shares_diluted`,
+   `shares_outstanding` — and nothing else.
+4. **Point-in-time must use unadjusted values.** A 2019 vintage should show
+   Apple's pre-split EPS, because that's what was on file. Adjustment belongs
+   to the current view only.
+5. Test: assert the AAPL FY2016→FY2018 series has no ratio jump above 1.5x.
+
+### Watch out for
+
+A genuine earnings collapse looks similar per-row. The distinguishing signal is
+that a split restates the **same period** across filings; an earnings drop
+changes the value **between periods**. Detect on the former only — my first
+detector conflated them and flagged AMAT's 2012 profit crash as a split.
+
+---
+
+## P6 — Ingest discards the evidence needed to improve the tag map
+
+**Also found by the real ingest, and it undermines `/coverage`.**
+
+`edgar.parse_companyfacts(doc, only_interesting=True)` filters every fact
+against `INTERESTING_CONCEPTS` before storing. Confirmed against the real
+database: 61 distinct concepts stored, 62 in the allowlist, **zero stored that
+aren't already claimed**.
+
+So `/coverage` can tell you *that* `gross_profit` resolves for only 58% of
+companies, but never *which tag the other 42% used*, because that fact was
+dropped at ingest. The page I described as "your work queue" cannot actually
+produce the queue.
+
+### Edits
+
+1. `ingest.py`: add `--discover` storing all facts, or a `fact_concepts`
+   census table recording `(cik, concept, count)` for every tag seen —
+   cheap, and enough to drive the analysis without storing every value.
+2. `/coverage`: for each thin metric, show the tags the *missing* companies
+   carry, ranked by company count. That turns the page into a real work queue.
+3. Re-run against the 20-company ingest before adding any tags — the current
+   gaps may be legitimately absent rather than missed.
+
+**Likely legitimate, not bugs:** `inventory` 68% (service companies hold none),
+`gross_profit` 58% (already back-computed from revenue − COGS),
+`cost_of_revenue` 77% (banks and insurers have none). Verify with the census
+before touching `concepts.py`.
+
+---
+
 <!-- Append new items below this line. -->

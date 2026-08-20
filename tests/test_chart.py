@@ -193,25 +193,6 @@ def test_missing_prices_degrades_gracefully():
     print("  OK  missing price history shows an explanation, not an empty frame")
 
 
-if __name__ == "__main__":
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    failed = 0
-    for t in tests:
-        print(f"{t.__name__}:")
-        try:
-            t()
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {e}")
-        except Exception as e:                              # noqa: BLE001
-            failed += 1
-            import traceback
-            print(f"  ERROR {type(e).__name__}: {e}")
-            traceback.print_exc()
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
-    sys.exit(1 if failed else 0)
-
-
 # ------------------------------------------------ company page restructure
 
 def test_metric_boxes_replaced_by_dense_rail():
@@ -277,10 +258,78 @@ def test_growth_refuses_sign_changes():
     print("  OK  growth returns None across sign changes and zero bases")
 
 
+def test_fiscal_quarter_label_respects_fiscal_year_end():
+    """Calendar quarters (Jan-Mar = Q1) are wrong for most real filers.
+
+    Apple's fiscal year ends in September, so its fiscal Q1 covers
+    Oct-Dec -- a period ending in December is Apple's Q1 of the *following*
+    fiscal year, not calendar Q4. Verified against Apple's real, publicly
+    reported quarter names.
+    """
+    from screener import analysis
+    aapl_fye = "0926"
+    assert analysis.fiscal_quarter_label("2024-09-28", aapl_fye) == "Q4 2024"
+    assert analysis.fiscal_quarter_label("2024-12-28", aapl_fye) == "Q1 2025"
+    assert analysis.fiscal_quarter_label("2025-03-29", aapl_fye) == "Q2 2025"
+    assert analysis.fiscal_quarter_label("2025-06-28", aapl_fye) == "Q3 2025"
+
+    wmt_fye = "0131"
+    assert analysis.fiscal_quarter_label("2025-01-31", wmt_fye) == "Q4 2025"
+    assert analysis.fiscal_quarter_label("2025-04-30", wmt_fye) == "Q1 2026"
+
+    # No fiscal_year_end on file -> assume calendar year, don't crash.
+    assert analysis.fiscal_quarter_label("2025-06-30", None) == "Q2 2025"
+    print("  OK  fiscal quarter labels match real Apple/Walmart quarter names")
+
+
 def test_peers_are_same_industry():
+    """Same SIC gets ranked as a peer; a different SIC never does.
+
+    This test was silently never running (see the note by the `if __name__`
+    block) until it was, at which point it failed for real: the 6 shared
+    fixtures are deliberately spread across 6 *different* SIC codes --
+    browse.py's sector tests need that diversity -- so none of them has a
+    natural same-industry peer among the others. Borrow LEGC's SIC for one
+    query to actually exercise the matching logic, then put it back so
+    later tests still see the original 6-way split.
+    """
     _, conn = setup()
     from screener import analysis
-    peers = analysis.peers(conn, 100001)
-    assert peers, "no peers found"
-    assert all(p["ticker"] != "MODT" for p in peers), "company is its own peer"
-    print(f"  OK  peers: {[p['ticker'] for p in peers][:5]}")
+    mine = conn.execute(
+        "SELECT sic_description FROM snapshot WHERE cik=100001").fetchone()[0]
+    original = conn.execute(
+        "SELECT sic_description FROM snapshot WHERE cik=100002").fetchone()[0]
+    conn.execute("UPDATE snapshot SET sic_description=? WHERE cik=100002", (mine,))
+    conn.commit()
+    try:
+        peers = analysis.peers(conn, 100001)
+        assert peers, "no peers found"
+        assert all(p["ticker"] != "MODT" for p in peers), "company is its own peer"
+        assert "LEGC" in [p["ticker"] for p in peers], "borrowed-SIC peer missing"
+        print(f"  OK  peers: {[p['ticker'] for p in peers][:5]}")
+    finally:
+        conn.execute("UPDATE snapshot SET sic_description=? WHERE cik=100002", (original,))
+        conn.commit()
+
+
+if __name__ == "__main__":
+    # Must stay at the end of the file -- globals() only sees functions the
+    # interpreter has already executed past. A runner defined mid-file
+    # silently drops every test below it; this file had 8 tests doing
+    # exactly that (never run, ever) before this got moved.
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for t in tests:
+        print(f"{t.__name__}:")
+        try:
+            t()
+        except AssertionError as e:
+            failed += 1
+            print(f"  FAIL  {e}")
+        except Exception as e:                              # noqa: BLE001
+            failed += 1
+            import traceback
+            print(f"  ERROR {type(e).__name__}: {e}")
+            traceback.print_exc()
+    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(1 if failed else 0)

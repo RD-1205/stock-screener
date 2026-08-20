@@ -478,6 +478,11 @@ def company(request: Request, ticker: str):
     if not row:
         raise HTTPException(404, f"{ticker.upper()} not found")
 
+    fye = conn.execute(
+        "SELECT fiscal_year_end FROM companies WHERE cik=?", (row["cik"],)
+    ).fetchone()
+    fiscal_year_end = fye["fiscal_year_end"] if fye else None
+
     history = annual_history(conn, row["cik"])
     tick = row["ticker"]
 
@@ -492,7 +497,8 @@ def company(request: Request, ticker: str):
         "c": row, "history": history,
         "quote": quote,
         "has_prices": has_prices,
-        "statement": analysis.statement(conn, row["cik"], "FY"),
+        "statement": analysis.statement(conn, row["cik"], "FY",
+                                        fiscal_year_end=fiscal_year_end),
         "ratios": analysis.ratios(conn, row["cik"]),
         "balance": analysis.balance_sheet(conn, row["cik"]),
         "peers": analysis.peers(conn, row["cik"]),
@@ -508,13 +514,17 @@ def company(request: Request, ticker: str):
 @app.get("/stocks/{ticker}/statement", response_class=HTMLResponse)
 def company_statement(request: Request, ticker: str, period: str = "FY"):
     """HTMX partial: the annual/quarterly toggle swaps just the table."""
-    row = get_conn().execute(
-        "SELECT cik FROM snapshot WHERE ticker=?", (ticker.upper(),)).fetchone()
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT c.cik, co.fiscal_year_end FROM snapshot c "
+        "JOIN companies co ON co.cik = c.cik WHERE c.ticker=?",
+        (ticker.upper(),)).fetchone()
     if not row:
         raise HTTPException(404, f"{ticker.upper()} not found")
     period = "Q" if period.upper() == "Q" else "FY"
-    data = analysis.statement(get_conn(), row["cik"], period,
-                              limit=12 if period == "Q" else 10)
+    data = analysis.statement(conn, row["cik"], period,
+                              limit=12 if period == "Q" else 10,
+                              fiscal_year_end=row["fiscal_year_end"])
     return templates.TemplateResponse(request, "_partials/_statement.html",
                                       {"statement": data})
 
