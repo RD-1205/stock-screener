@@ -91,12 +91,26 @@ def cik_str(cik):
 
 
 def fetch_tickers(user_agent):
-    """Returns [{cik, ticker, name}] for every listed filer (~10k rows)."""
+    """Returns [{cik, ticker, name}] for every listed filer (~10k rows).
+
+    SEC lists a CIK's primary common ticker first, then any other securities
+    registered under the same CIK -- preferred share series, ETFs sharing the
+    filer's corporate registration, stale when-issued tickers from old stock
+    splits. JPMorgan's CIK alone has 9 entries; only the first (JPM) is the
+    one anyone means. Keep first-seen per CIK and drop the rest, or every
+    multi-security filer ends up stored under whichever ticker happened to be
+    listed last.
+    """
     data = get_json(f"{BASE_SEC}/files/company_tickers.json", user_agent)
     out = []
+    seen_ciks = set()
     for row in (data or {}).values():
+        cik = int(row["cik_str"])
+        if cik in seen_ciks:
+            continue
+        seen_ciks.add(cik)
         out.append({
-            "cik": int(row["cik_str"]),
+            "cik": cik,
             "ticker": row["ticker"].strip().upper(),
             "name": row["title"].strip(),
         })

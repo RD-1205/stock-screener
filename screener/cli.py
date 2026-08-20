@@ -58,14 +58,19 @@ def cmd_ingest(args):
         return
 
     ua = _ua()
+    params = []
     q = "SELECT cik, ticker FROM companies WHERE ticker IS NOT NULL"
-    if not args.refresh:
+    if args.tickers:
+        wanted = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+        q += f" AND ticker IN ({','.join('?' * len(wanted))})"
+        params = wanted
+    elif not args.refresh:
         q += " AND cik NOT IN (SELECT cik FROM ingest_log WHERE status='ok')"
     q += " ORDER BY cik"
-    if args.limit:
+    if args.limit and not args.tickers:
         q += f" LIMIT {int(args.limit)}"
 
-    targets = conn.execute(q).fetchall()
+    targets = conn.execute(q, params).fetchall()
     print(f"ingesting {len(targets):,} companies (~{len(targets)*0.25:.0f}s at SEC rate limit)")
     total = 0
     for i, row in enumerate(targets, 1):
@@ -84,13 +89,18 @@ def ingest_bulk(conn, args):
 
 def cmd_prices(args):
     conn = db.connect(args.db)
+    params = []
     q = "SELECT DISTINCT ticker FROM companies WHERE ticker IS NOT NULL"
-    if args.only_ingested:
+    if args.tickers:
+        wanted = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+        q += f" AND ticker IN ({','.join('?' * len(wanted))})"
+        params = wanted
+    elif args.only_ingested:
         q += " AND cik IN (SELECT cik FROM facts)"
     q += " ORDER BY ticker"
-    if args.limit:
+    if args.limit and not args.tickers:
         q += f" LIMIT {int(args.limit)}"
-    tickers = [r[0] for r in conn.execute(q)]
+    tickers = [r[0] for r in conn.execute(q, params)]
 
     fetch = prices.fetch_eodhd if args.provider == "eodhd" else prices.fetch_stooq
     total = 0
@@ -212,6 +222,7 @@ def main(argv=None):
 
     g = sub.add_parser("ingest", help="load XBRL facts")
     g.add_argument("--limit", type=int)
+    g.add_argument("--tickers", help="comma-separated tickers, e.g. AAPL,MSFT (overrides --limit)")
     g.add_argument("--refresh", action="store_true", help="re-fetch already-ingested filers")
     g.add_argument("--zip", help="path to SEC companyfacts.zip (bulk load)")
     g.add_argument("--dir", help="directory of companyfacts JSON files")
@@ -219,6 +230,7 @@ def main(argv=None):
 
     g = sub.add_parser("prices")
     g.add_argument("--limit", type=int)
+    g.add_argument("--tickers", help="comma-separated tickers, e.g. AAPL,MSFT (overrides --limit)")
     g.add_argument("--provider", choices=["stooq", "eodhd"], default="stooq")
     g.add_argument("--only-ingested", action="store_true", default=True)
     g.set_defaults(func=cmd_prices)
