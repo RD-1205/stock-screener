@@ -125,7 +125,8 @@
 
     function build() {
       chart = LightweightCharts.createChart(canvas, {
-        autoSize: true,
+        width: canvas.clientWidth,
+        height: canvas.clientHeight,
         layout: {
           background: { type: "solid", color: "transparent" },
           textColor: css("--text-2"),
@@ -165,16 +166,22 @@
         priceScaleId: "left"
       });
 
-      // autoSize's own resize doesn't re-fit the visible range -- it just
-      // resizes the canvas and keeps whatever zoom/offset was already set.
-      // Combined with fitContent() running synchronously right after
-      // setData() (before autoSize's ResizeObserver has even fired once,
-      // especially right after an IntersectionObserver-triggered mount like
-      // this one), the chart fits itself to a stale, often-tiny width, then
-      // grows into its real size with all the new room left as empty space
-      // on one side. Re-fitting on every real resize is the fix.
-      new ResizeObserver(function () {
-        if (line) chart.timeScale().fitContent();
+      // Deliberately not using the `autoSize` option. It installs its own
+      // internal ResizeObserver that resizes the canvas but does NOT re-fit
+      // the visible range afterwards -- it just grows the canvas and leaves
+      // the new room empty, which is the exact bug this replaces. A second,
+      // independent ResizeObserver calling fitContent() (the previous fix
+      // here) doesn't reliably win that race either: two separate observers
+      // on the same element fire in unspecified relative order, so ours
+      // could run before the library's own internal resize has actually
+      // applied the new width. Doing both steps ourselves, in one callback,
+      // in a guaranteed order, removes the race entirely.
+      new ResizeObserver(function (entries) {
+        var box = entries[0].contentRect;
+        if (box.width > 0 && box.height > 0) {
+          chart.resize(box.width, box.height);
+          chart.timeScale().fitContent();
+        }
       }).observe(canvas);
 
       // Crosshair drives the legend, so the number under the cursor is always

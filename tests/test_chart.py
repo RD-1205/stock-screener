@@ -239,15 +239,33 @@ def test_quarterly_toggle_returns_a_fragment():
 
 def test_quarterly_growth_compares_year_over_year():
     """Sequential quarterly growth mostly measures seasonality, so the YoY
-    column must look back four quarters, not one."""
+    column must look back four quarters, not one.
+
+    Tables display newest-period-first (index 0 = most recent quarter), but
+    the *oldest* periods are the ones without 4 prior quarters to compare
+    against -- so the None gap sits at the END of these newest-first arrays,
+    not the start.
+    """
     _, conn = setup()
     from screener import analysis
     q = analysis.statement(conn, 100001, "Q", limit=8)
     rev = next(r for r in q["rows"] if r["metric"] == "revenue")
-    assert all(g is None for g in rev["yoy"][:4]), "YoY should need 4 prior quarters"
-    assert any(g is not None for g in rev["yoy"][4:]), "no YoY computed"
-    assert any(g is not None for g in rev["qoq"][1:]), "QoQ not computed"
+    assert all(g is None for g in rev["yoy"][-4:]), "YoY should need 4 prior quarters"
+    assert any(g is not None for g in rev["yoy"][:4]), "no YoY computed"
+    assert any(g is not None for g in rev["qoq"][:-1]), "QoQ not computed"
     print("  OK  quarterly YoY looks back 4 quarters, QoQ looks back 1")
+
+
+def test_statement_shows_newest_period_first():
+    """Financial tables read newest-to-oldest, left to right -- the
+    convention every real statement viewer uses, and the opposite of the
+    chronological order the growth math is computed in internally."""
+    _, conn = setup()
+    from screener import analysis
+    q = analysis.statement(conn, 100001, "Q", limit=8)
+    assert q["periods"] == sorted(q["periods"], reverse=True), (
+        "periods should run newest -> oldest, left to right")
+    print(f"  OK  newest quarter first: {q['periods'][0]} .. {q['periods'][-1]}")
 
 
 def test_growth_refuses_sign_changes():
