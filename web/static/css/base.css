@@ -434,6 +434,51 @@ tbody tr:hover { background: var(--surface-2); }
   text-anchor: middle; font-family: var(--font-mono);
 }
 
+/* --------------------------------------------------------- price chart island */
+.chart-panel { padding: var(--sp-4); }
+
+.chart-legend {
+  display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-3); min-height: 28px;
+}
+.chart-legend-price {
+  font-family: var(--font-mono); font-size: var(--fs-2xl);
+  font-weight: var(--fw-medium); color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.chart-legend-change {
+  font-family: var(--font-mono); font-size: var(--fs-base);
+  font-weight: var(--fw-medium); font-variant-numeric: tabular-nums;
+}
+.chart-legend-change.up { color: var(--up); }
+.chart-legend-change.down { color: var(--down); }
+.chart-legend-date {
+  font-family: var(--font-sans); font-size: var(--fs-sm); color: var(--text-3);
+}
+.chart-legend-status { margin-left: auto; }
+
+/* Height, not just width, is what makes a chart feel substantial -- a wide
+   box with a squat line inside it is the exact complaint this fixes. */
+.chart-canvas { height: 460px; width: 100%; }
+
+/* Plain text tabs, not boxed chips -- a range selector is chrome, not a set
+   of equally-weighted choices, so it shouldn't compete visually with the
+   chart itself. */
+.range-tabs {
+  display: flex; gap: var(--sp-4); margin-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle); padding-top: var(--sp-2);
+}
+.range-tab {
+  background: none; border: none; padding: var(--sp-1) 2px;
+  font-family: var(--font-sans); font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.range-tab:hover { color: var(--text-1); background: none; }
+.range-tab[aria-pressed="true"] {
+  color: var(--accent); border-bottom-color: var(--accent);
+}
+
 /* -------------------------------------------------------------------- htmx */
 .htmx-request .htmx-indicator { opacity: 1; }
 .htmx-indicator { opacity: 0; transition: opacity var(--dur-fast) var(--ease); }

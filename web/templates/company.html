@@ -57,15 +57,17 @@
 
 <section id="chart">
 {% if has_prices %}
-  <div class="panel" data-chart="{{ c['ticker'] }}" style="padding:var(--sp-3)">
-    <div class="row" style="justify-content:space-between;margin-bottom:var(--sp-2)">
-      <span class="mono" data-chart-legend style="font-size:var(--fs-md)"></span>
-      <span class="dim mono" data-chart-status style="font-size:var(--fs-sm)" hidden></span>
+  <div class="panel chart-panel" data-chart="{{ c['ticker'] }}">
+    <div class="chart-legend" data-chart-legend>
+      <span class="chart-legend-price" data-legend-price></span>
+      <span class="chart-legend-change" data-legend-change></span>
+      <span class="chart-legend-date" data-legend-date></span>
+      <span class="dim mono chart-legend-status" data-chart-status hidden></span>
     </div>
-    <div data-chart-canvas style="height:320px;width:100%"></div>
-    <div class="chips" role="group" aria-label="Chart range" style="margin-top:var(--sp-3)">
-      {% for r, lbl in [('1m','1M'),('6m','6M'),('1y','1Y'),('5y','5Y'),('10y','10Y'),('max','MAX')] %}
-        <button class="chip" type="button" data-range="{{ r }}"
+    <div class="chart-canvas" data-chart-canvas></div>
+    <div class="range-tabs" role="group" aria-label="Chart range">
+      {% for r, lbl in [('5d','5D'),('1m','1M'),('6m','6M'),('1y','1Y'),('5y','5Y'),('max','MAX')] %}
+        <button class="range-tab" type="button" data-range="{{ r }}"
                 aria-pressed="{{ 'true' if r == '1y' else 'false' }}">{{ lbl }}</button>
       {% endfor %}
     </div>
