@@ -105,6 +105,22 @@ def fiscal_quarter_label(period_end, fiscal_year_end=None):
     return f"Q{quarter} {fiscal_year}"
 
 
+def _newest_first(cols, labels, rows):
+    """Flip every table to newest-period-first (leftmost), matching how
+    financial statements are conventionally read.
+
+    Growth (yoy/qoq) has to be computed chronologically -- vals[i-1] means
+    "the prior period" -- so the calculation above runs oldest-to-newest and
+    this reverses everything together only at the very end, keeping each
+    row's vals/yoy/qoq aligned with the now-reversed period columns.
+    """
+    for row in rows:
+        row["vals"] = row["vals"][::-1]
+        row["yoy"] = row["yoy"][::-1]
+        row["qoq"] = row["qoq"][::-1]
+    return cols[::-1], labels[::-1], rows
+
+
 def _nearest_instant(conn, cik, on_or_before):
     """Balance-sheet value closest to a flow period's end date.
 
@@ -153,6 +169,7 @@ def statement(conn, cik, period_type="FY", limit=10, fiscal_year_end=None):
         labels = [fiscal_quarter_label(p, fiscal_year_end) for p in cols]
     else:
         labels = [p[:4] for p in cols]
+    cols, labels, rows = _newest_first(cols, labels, rows)
 
     return {"periods": cols, "period_labels": labels, "rows": rows,
             "period_type": period_type}
@@ -181,7 +198,8 @@ def balance_sheet(conn, cik, limit=10):
                for i in range(len(cols))]
         rows.append({"metric": metric, "label": label, "kind": kind,
                      "vals": vals, "yoy": yoy, "qoq": [None] * len(cols)})
-    return {"periods": cols, "period_labels": [p[:4] for p in cols],
+    cols, labels, rows = _newest_first(cols, [p[:4] for p in cols], rows)
+    return {"periods": cols, "period_labels": labels,
             "rows": rows, "period_type": "INSTANT"}
 
 
@@ -252,7 +270,8 @@ def ratios(conn, cik, limit=10):
         rows.append({"metric": name, "label": label, "kind": kind,
                      "vals": vals,
                      "yoy": [None] * len(cols), "qoq": [None] * len(cols)})
-    return {"periods": cols, "period_labels": [p[:4] for p in cols],
+    cols, labels, rows = _newest_first(cols, [p[:4] for p in cols], rows)
+    return {"periods": cols, "period_labels": labels,
             "rows": rows, "period_type": "FY"}
 
 
