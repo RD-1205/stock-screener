@@ -142,7 +142,7 @@ def test_filters_compose():
     banking = set(tickers(c, "/stocks?sector=banking"))
     assert both == sp & banking, f"{both} != {sp & banking}"
     assert both, "composition returned nothing"
-    print(f"  OK  index ∩ sector = {both}")
+    print(f"  OK  index & sector = {both}")
 
 
 def test_sort_survives_filtering():

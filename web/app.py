@@ -50,6 +50,7 @@ NAV = [
     ("/screener", "Screener"),
     ("/stocks", "Stocks"),
     ("/screens", "Screens"),
+    ("/lists", "Lists"),
     ("/coverage", "Coverage"),
 ]
 
@@ -60,6 +61,67 @@ EXAMPLES = [
     ("Deep value", "pb < 1.5 and pe < 12"),
     ("Cash generators", "fcf > 500m and market_cap > 2b"),
 ]
+
+
+def slugify(label):
+    return label.lower().replace(" ", "-").replace("/", "")
+
+
+# Curated screens keyed by slug so /screens (gallery) and /screens/{slug}
+# (indexable, pre-run page) share one source of truth -- see docs/SITEMAP.md,
+# "curated screens live at /screens/{slug} precisely so there's a canonical
+# indexable version" of what would otherwise be a noindexed ?q= URL.
+SCREENS = {slugify(label): (label, query) for label, query in EXAMPLES}
+
+# Curated "top 50 by metric" pages. Each is one ORDER BY against `snapshot`,
+# and the SEO case for them is real -- "highest roe stocks" is a genuine
+# search term with no good free answer. `positive` guards ratios where a
+# negative value is either meaningless (P/E, P/B) or a negative-equity
+# artifact (D/E) rather than a legitimate "lowest".
+LISTS = {
+    "highest-roe-stocks": {
+        "title": "Highest ROE stocks", "column": "roe", "direction": "desc",
+        "kind": "pct", "positive": False,
+        "blurb": "Ranked by return on equity, trailing twelve months.",
+    },
+    "lowest-pe-stocks": {
+        "title": "Lowest P/E stocks", "column": "pe", "direction": "asc",
+        "kind": "num", "positive": True,
+        "blurb": "Ranked by price-to-earnings, lowest first. Loss-making "
+                 "companies (no meaningful P/E) are excluded, not shown as "
+                 "cheapest.",
+    },
+    "highest-net-margin-stocks": {
+        "title": "Highest net margin stocks", "column": "net_margin",
+        "direction": "desc", "kind": "pct", "positive": False,
+        "blurb": "Ranked by net income as a share of revenue.",
+    },
+    "highest-revenue-growth-stocks": {
+        "title": "Highest revenue growth stocks", "column": "revenue_cagr_3y",
+        "direction": "desc", "kind": "pct", "positive": False,
+        "blurb": "Ranked by 3-year revenue CAGR.",
+    },
+    "lowest-debt-to-equity-stocks": {
+        "title": "Lowest debt-to-equity stocks", "column": "debt_to_equity",
+        "direction": "asc", "kind": "num", "positive": True,
+        "blurb": "Ranked by debt-to-equity, lowest first.",
+    },
+    "largest-companies": {
+        "title": "Largest companies by market cap", "column": "market_cap",
+        "direction": "desc", "kind": "money", "positive": False,
+        "blurb": "Ranked by market capitalization.",
+    },
+    "highest-fcf-stocks": {
+        "title": "Highest free cash flow stocks", "column": "fcf_ttm",
+        "direction": "desc", "kind": "money", "positive": False,
+        "blurb": "Ranked by trailing twelve-month free cash flow.",
+    },
+    "lowest-pb-stocks": {
+        "title": "Lowest P/B stocks", "column": "pb", "direction": "asc",
+        "kind": "num", "positive": True,
+        "blurb": "Ranked by price-to-book, lowest first.",
+    },
+}
 
 TABLE_COLS = [
     ("ticker", "Ticker", "text"),
@@ -343,17 +405,68 @@ def screens_index(request: Request):
     """
     conn = get_conn()
     cards = []
-    for label, query in EXAMPLES:
+    for slug, (label, query) in SCREENS.items():
         try:
             count = len(screen.run(conn, query, limit=500, select="ticker"))
         except Exception:                               # noqa: BLE001
             count = None
-        cards.append({
-            "label": label, "query": query, "count": count,
-            "slug": label.lower().replace(" ", "-").replace("/", ""),
-        })
+        cards.append({"label": label, "query": query, "count": count, "slug": slug})
     return templates.TemplateResponse(request, "pages/screens_index.html",
                                       {"cards": cards})
+
+
+@app.get("/screens/{slug}", response_class=HTMLResponse)
+def screen_detail(request: Request, slug: str,
+                  order: str = "market_cap", dir: str = "desc", limit: int = 50):
+    """A curated screen, pre-run, at a stable indexable URL.
+
+    Unlike /screener?q=..., this has no arbitrary query parameter, so it's a
+    real canonical page search engines can rank -- see docs/SITEMAP.md.
+    """
+    found = SCREENS.get(slug)
+    if not found:
+        raise HTTPException(404, "Screen not found")
+    label, query = found
+
+    conn = get_conn()
+    error, rows = None, []
+    try:
+        rows = run_screen(conn, query, "", order, dir, limit)
+    except screen.QueryError as e:
+        error = str(e)
+
+    return templates.TemplateResponse(request, "pages/screen_detail.html", {
+        "label": label, "query": query, "slug": slug,
+        "rows": rows, "error": error, "cols": TABLE_COLS,
+        "q": query, "as_of": "", "order": order, "dir": dir, "limit": limit,
+    })
+
+
+@app.get("/lists", response_class=HTMLResponse)
+def lists_index(request: Request):
+    """Gallery of the curated per-metric list pages, same job as /screens:
+    onboarding plus a hub other pages and the sitemap can link into."""
+    return templates.TemplateResponse(request, "pages/lists_index.html", {
+        "lists": [{"slug": s, **cfg} for s, cfg in LISTS.items()],
+    })
+
+
+@app.get("/lists/{slug}", response_class=HTMLResponse)
+def list_detail(request: Request, slug: str):
+    cfg = LISTS.get(slug)
+    if not cfg:
+        raise HTTPException(404, "List not found")
+
+    col = cfg["column"]                     # from LISTS, not user input -- safe to interpolate
+    where = f"{col} IS NOT NULL" + (f" AND {col} > 0" if cfg["positive"] else "")
+    order = "DESC" if cfg["direction"] == "desc" else "ASC"
+    rows = get_conn().execute(
+        f"SELECT {SELECT} FROM snapshot WHERE {where} ORDER BY {col} {order} LIMIT 50"
+    ).fetchall()
+
+    return templates.TemplateResponse(request, "pages/list_detail.html", {
+        "cfg": cfg, "slug": slug, "rows": rows, "cols": TABLE_COLS,
+    })
 
 
 @app.get("/stocks/{ticker}", response_class=HTMLResponse)
@@ -515,8 +628,10 @@ def robots():
 def sitemap():
     """Flat sitemap for now. Split into a sitemap index once company pages
     push past 50,000 URLs -- see docs/SITEMAP.md §4."""
-    urls = ["/", "/screener", "/stocks", "/screens", "/coverage",
+    urls = ["/", "/screener", "/stocks", "/screens", "/lists", "/coverage",
             "/methodology", "/about", "/terms", "/privacy", "/disclaimer"]
+    urls += [f"/screens/{slug}" for slug in SCREENS]
+    urls += [f"/lists/{slug}" for slug in LISTS]
     try:
         urls += [f"/stocks/{r[0]}" for r in get_conn().execute(
             "SELECT ticker FROM snapshot WHERE ticker IS NOT NULL "

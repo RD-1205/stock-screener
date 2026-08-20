@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Stock lists — {{ site_name }}{% endblock %}
+{% block description %}Companies ranked by ROE, P/E, revenue growth, debt-to-equity, free cash flow and more, computed from SEC filing data.{% endblock %}
+
+{% block content %}
+<h1>Lists</h1>
+<p class="sub">The top 50 US companies by a single metric, updated with the data.</p>
+
+<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">
+  {% for l in lists %}
+    <div class="panel">
+      <h3 style="font-size:var(--fs-base);margin-bottom:var(--sp-2)">{{ l.title }}</h3>
+      <p class="muted" style="font-size:var(--fs-sm);margin-bottom:var(--sp-3)">{{ l.blurb }}</p>
+      <a class="btn btn-secondary" href="/lists/{{ l.slug }}">View list</a>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

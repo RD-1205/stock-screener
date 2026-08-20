@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ cfg.title }} — {{ site_name }}{% endblock %}
+{% block description %}{{ cfg.title }}, ranked from SEC EDGAR fundamentals. {{ cfg.blurb }}{% endblock %}
+
+{% block content %}
+<h1>{{ cfg.title }}</h1>
+<p class="sub">{{ cfg.blurb }}</p>
+
+<div id="results">
+  {% if not rows %}
+    <div class="empty">No companies currently rank on this metric.</div>
+  {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          {% for key, label, kind in cols %}<th>{{ label }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td class="dim">{{ loop.index }}</td>
+            {% for key, label, kind in cols %}
+              <td>
+                {% if key == 'ticker' %}
+                  <a href="/stocks/{{ r['ticker'] }}">{{ r['ticker'] }}</a>
+                {% else %}
+                  {{ render_cell(r[key], kind) }}
+                {% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="margin-top:12px;font-size:12px">
+      {{ rows|length }} compan{{ 'y' if rows|length == 1 else 'ies' }}
+    </p>
+  {% endif %}
+</div>
+
+<div class="panel" style="margin-top:var(--sp-4)">
+  <a class="btn btn-secondary" href="/lists">All lists</a>
+</div>
+{% endblock %}
