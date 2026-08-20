@@ -12,7 +12,11 @@
 (function () {
   "use strict";
 
-  var LIB = "https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.js";
+  // cdnjs dropped this library from its catalog at some point after this was
+  // written (confirmed 2026-08-19: the old cdnjs URL 404s). jsDelivr mirrors
+  // every npm version indefinitely, so pin there instead of chasing whatever
+  // host has it this month.
+  var LIB = "https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
   var libPromise = null;
 
   function loadLib() {
