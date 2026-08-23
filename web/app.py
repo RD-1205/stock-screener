@@ -13,6 +13,7 @@ Run:  python -m screener.cli serve
 Docs: http://127.0.0.1:8000/api/docs
 """
 
+import math
 import os
 import sys
 import time
@@ -275,13 +276,17 @@ def home(request: Request):
         total = conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0]
     except Exception:                                   # noqa: BLE001
         largest, total = [], 0
+    mood = mood_svg = None
     try:
         mood = sentiment.latest(conn)
+        if mood:
+            mood_svg = mood_gauge_svg(mood["composite"])
     except Exception:                                   # noqa: BLE001
-        mood = None                                     # never break the landing page over this
+        mood = mood_svg = None            # never break the landing page over this
 
     return templates.TemplateResponse(request, "pages/home.html", {
         "largest": largest, "total": total, "examples": EXAMPLES, "mood": mood,
+        "mood_svg": mood_svg,
     })
 
 
@@ -788,6 +793,57 @@ def bar_chart(pairs, width=560, height=140):
         )
     return (f'<svg viewBox="0 0 {width} {height}" class="chart" '
             f'preserveAspectRatio="none">{"".join(bars)}</svg>')
+
+
+# score 0-100 -> zone slug, matching screener.sentiment.ZONES exactly so the
+# arc segments and the text label always agree with each other.
+_MOOD_ZONE_SLUGS = ["extreme-fear", "fear", "neutral", "greed", "extreme-greed"]
+
+
+def _polar(cx, cy, r, score):
+    """A point on the gauge arc for a 0-100 score.
+
+    Score 0 sits at the left end of the semicircle (180 deg, math
+    convention), 100 at the right end (0 deg), 50 straight up (90 deg) --
+    left-to-right reads fear-to-greed the way the linear bar already did.
+    SVG y grows downward, so the y term is subtracted rather than added.
+    """
+    angle = math.radians(180 - (score / 100.0) * 180)
+    return cx + r * math.cos(angle), cy - r * math.sin(angle)
+
+
+def mood_gauge_svg(composite, width=300, height=180):
+    """Server-rendered semicircle dial: 5 coloured zone bands, a needle at
+    the current score. No JS, no chart library -- same approach as
+    bar_chart() above."""
+    cx, cy = width / 2, height - 20
+    r_out, r_in = height - 40, height - 75
+
+    bands = []
+    for i, slug in enumerate(_MOOD_ZONE_SLUGS):
+        lo, hi = i * 20, (i + 1) * 20
+        x1o, y1o = _polar(cx, cy, r_out, lo)
+        x2o, y2o = _polar(cx, cy, r_out, hi)
+        x1i, y1i = _polar(cx, cy, r_in, lo)
+        x2i, y2i = _polar(cx, cy, r_in, hi)
+        bands.append(
+            f'<path class="mood-arc-{slug}" d="'
+            f'M {x1o:.1f} {y1o:.1f} '
+            f'A {r_out:.1f} {r_out:.1f} 0 0 1 {x2o:.1f} {y2o:.1f} '
+            f'L {x2i:.1f} {y2i:.1f} '
+            f'A {r_in:.1f} {r_in:.1f} 0 0 0 {x1i:.1f} {y1i:.1f} Z"/>'
+        )
+
+    score = max(0.0, min(100.0, composite))
+    nx, ny = _polar(cx, cy, r_out + 8, score)
+    needle = (
+        f'<line x1="{cx}" y1="{cy}" x2="{nx:.1f}" y2="{ny:.1f}" class="mood-needle"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="6" class="mood-needle-hub"/>'
+    )
+
+    return (f'<svg viewBox="0 0 {width} {height}" class="mood-dial" '
+            f'role="img" aria-label="Market mood: {score:.0f} out of 100">'
+            f'{"".join(bands)}{needle}</svg>')
 
 
 # ---------------------------------------------------------------- catch-all
