@@ -3,9 +3,9 @@
 
 {% block content %}
 {#
-  Landing shell. The market pulse band (R5/R6) and the filing news feed (R1)
-  slot in above and below the search respectively at build step 6. Everything
-  shown here is real data -- no placeholder numbers.
+  Landing shell. The mood gauge (R6) is real, computed from our own price
+  data -- see screener/sentiment.py. The filing news feed (R1) still hasn't
+  landed. Everything shown here is real data -- no placeholder numbers.
 #}
 
 <section style="text-align:center;padding:var(--sp-7) 0 var(--sp-6)">
@@ -33,6 +33,41 @@
     </p>
   {% endif %}
 </section>
+
+{% if mood %}
+<section class="panel" style="margin-bottom:var(--sp-6)">
+  <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:var(--sp-2)">
+    <div>
+      <span class="mono" style="font-size:var(--fs-2xl);font-weight:var(--fw-medium)">{{ '%.0f'|format(mood.composite) }}</span>
+      <span style="font-size:var(--fs-lg);margin-left:var(--sp-2)">{{ mood.zone_label }}</span>
+    </div>
+    <span class="dim" style="font-size:var(--fs-sm)">Market mood · {{ mood.date }}</span>
+  </div>
+  <div class="mood-gauge">
+    <div class="mood-gauge-track">
+      <div class="mood-gauge-marker" style="left:{{ mood.composite }}%"></div>
+      <div class="mood-gauge-zone extreme-fear"></div>
+      <div class="mood-gauge-zone fear"></div>
+      <div class="mood-gauge-zone neutral"></div>
+      <div class="mood-gauge-zone greed"></div>
+      <div class="mood-gauge-zone extreme-greed"></div>
+    </div>
+    <div class="mood-gauge-labels">
+      <span>Extreme fear</span><span>Fear</span><span>Neutral</span><span>Greed</span><span>Extreme greed</span>
+    </div>
+  </div>
+  <p class="dim mono" style="font-size:var(--fs-xs);margin-top:var(--sp-3)">
+    Momentum {{ '%.0f'|format(mood.momentum) if mood.momentum is not none else '—' }}
+    · Strength {{ '%.0f'|format(mood.strength) if mood.strength is not none else '—' }}
+    · Breadth {{ '%.0f'|format(mood.breadth) if mood.breadth is not none else '—' }}
+  </p>
+  <p class="dim" style="font-size:var(--fs-xs);margin-top:var(--sp-1)">
+    Computed from {{ mood.universe_size }} priced companies —
+    {{ mood.components.available_of_7 }} of 7 CNN-style components available so far.
+    <a href="/methodology#mood">How this is computed →</a>
+  </p>
+</section>
+{% endif %}
 
 <h2>Most active today</h2>
 {% if largest %}

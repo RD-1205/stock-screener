@@ -27,8 +27,8 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import (analysis, browse, db, quotes, screen, series,  # noqa: E402
-                      transform)
+from screener import (analysis, browse, db, quotes, screen, sentiment,  # noqa: E402
+                      series, transform)
 from screener.concepts import METRICS                        # noqa: E402
 from web.content import legal                                # noqa: E402
 
@@ -266,8 +266,8 @@ def home(request: Request):
     """Landing page.
 
     Currently the shell plus what we can honestly show from real data. The
-    filing news feed (R1) and market pulse band (R5/R6) land in build step 6 --
-    stubbing them with fake data now would just hide how much is left.
+    filing news feed (R1) lands in a later build step -- stubbing it with
+    fake data now would just hide how much is left.
     """
     conn = get_conn()
     try:
@@ -275,9 +275,13 @@ def home(request: Request):
         total = conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0]
     except Exception:                                   # noqa: BLE001
         largest, total = [], 0
+    try:
+        mood = sentiment.latest(conn)
+    except Exception:                                   # noqa: BLE001
+        mood = None                                     # never break the landing page over this
 
     return templates.TemplateResponse(request, "pages/home.html", {
-        "largest": largest, "total": total, "examples": EXAMPLES,
+        "largest": largest, "total": total, "examples": EXAMPLES, "mood": mood,
     })
 
 

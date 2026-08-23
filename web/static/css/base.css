@@ -434,6 +434,28 @@ tbody tr:hover { background: var(--surface-2); }
   text-anchor: middle; font-family: var(--font-mono);
 }
 
+/* --------------------------------------------------------------- mood gauge */
+.mood-gauge { margin: var(--sp-2) 0; }
+.mood-gauge-track {
+  position: relative; display: flex; height: 10px;
+  border-radius: var(--radius-pill); overflow: hidden;
+}
+.mood-gauge-zone { flex: 1; }
+.mood-gauge-zone.extreme-fear { background: var(--down); }
+.mood-gauge-zone.fear { background: var(--down); opacity: .5; }
+.mood-gauge-zone.neutral { background: var(--border-strong); }
+.mood-gauge-zone.greed { background: var(--up); opacity: .5; }
+.mood-gauge-zone.extreme-greed { background: var(--up); }
+.mood-gauge-marker {
+  position: absolute; top: -4px; width: 2px; height: 18px;
+  background: var(--text-1); transform: translateX(-1px); z-index: 1;
+}
+.mood-gauge-labels {
+  display: flex; justify-content: space-between; margin-top: var(--sp-1);
+  font-size: var(--fs-2xs); color: var(--text-3);
+  text-transform: uppercase; letter-spacing: var(--tracking-wide);
+}
+
 /* --------------------------------------------------------- price chart island */
 .chart-panel { padding: var(--sp-4); }
 

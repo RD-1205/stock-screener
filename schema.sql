@@ -256,3 +256,27 @@ CREATE TABLE IF NOT EXISTS index_members (
     PRIMARY KEY (index_slug, ticker)
 );
 CREATE INDEX IF NOT EXISTS idx_index_ticker ON index_members(ticker);
+
+
+-- ---------------------------------------------------------------
+-- 8. Market sentiment gauge.
+--
+-- CNN's Fear & Greed Index weights 7 indicators equally, each as a
+-- standard-deviation move from its own recent norm (see
+-- docs/DESIGN-SPEC.md 7.3). v1 computes the 3 that come straight from our
+-- own price DB -- momentum, price strength, breadth -- honestly labelled as
+-- partial rather than faking the other 4 (volatility, junk bond demand,
+-- safe haven demand, put/call), which need FRED/CBOE feeds not wired up yet.
+-- One row per trading day so a real history (and eventually proper z-scores
+-- against it, once enough days exist) accumulates starting from day one.
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sentiment (
+    date            TEXT PRIMARY KEY,   -- YYYY-MM-DD, the trading day this reflects
+    momentum        REAL,               -- 0-100: universe price vs its own moving average
+    strength        REAL,               -- 0-100: net share near highs vs near lows
+    breadth         REAL,               -- 0-100: advancing vs declining volume
+    composite       REAL,               -- equal-weighted average of the components above
+    components_json TEXT,               -- raw inputs behind each score, for the breakdown UI
+    universe_size   INTEGER,            -- how many priced tickers fed this reading
+    computed_at     TEXT
+);
