@@ -156,6 +156,37 @@ early 2024, so nobody screening in January 2024 could see it. Prices use the
 last close on or before the date, and the universe excludes companies that
 hadn't filed yet.</p>
 
+<h2 id="mood">The market mood gauge</h2>
+<p>Modeled on the structure of CNN's Fear &amp; Greed Index (a published
+methodology, not a licensed feed) — a 0–100 reading in five zones, from
+extreme fear to extreme greed. Ours is computed from scratch, not scraped,
+because scraping a competitor's proprietary index would be both against their
+terms and pointless to show your work about.</p>
+<p>CNN weights seven equally-weighted components. We currently compute three,
+all straight from our own price data:</p>
+<ul>
+<li><strong>Momentum</strong> — how far the average priced stock sits above or
+below its own recent trend line, a stand-in for "S&amp;P 500 vs its 125-day
+moving average" using the universe of companies we've actually priced rather
+than a licensed index series.</li>
+<li><strong>Strength</strong> — the net share of that universe sitting near a
+price high versus near a price low, over whatever history we have for each
+company (currently capped at roughly a year by our price provider's free
+tier — not a true 52-week window for every name yet).</li>
+<li><strong>Breadth</strong> — advancing versus declining trading volume on
+the most recent day.</li>
+</ul>
+<p>The other four CNN-style components — volatility (VIX), high-yield credit
+spreads, safe-haven demand, and the CBOE put/call ratio — need data feeds
+(FRED, CBOE) that aren't wired up yet. The composite score is an
+equal-weighted average of whichever components are available, and every page
+that shows it says how many of the seven that currently is.</p>
+<p>A proper reading should be a standard-deviation move from a metric's own
+recent history, which needs weeks of accumulated daily readings we don't have
+yet on a freshly-launched gauge. Until then, each raw ratio is mapped onto
+0–100 using a fixed range rather than a statistical norm — an honest
+approximation while <code>sentiment</code> data accumulates day by day.</p>
+
 <h2>Known limitations</h2>
 <p>Stated plainly, because every one of these affects how you should read the
 numbers:</p>

@@ -18,7 +18,7 @@ import os
 import sys
 from datetime import date
 
-from . import db, edgar, ingest, prices, screen, transform
+from . import db, edgar, ingest, prices, screen, sentiment, transform
 
 
 def _ua():
@@ -124,6 +124,19 @@ def cmd_snapshot(args):
     conn = db.connect(args.db)
     n = transform.build_snapshot(conn)
     print(f"snapshot rebuilt for {n:,} companies")
+
+
+def cmd_sentiment(args):
+    conn = db.connect(args.db)
+    row = sentiment.compute(conn)
+    if not row:
+        print(f"not enough priced companies yet (need >= {sentiment.MIN_UNIVERSE})")
+        return
+    sentiment.store(conn, row)
+    zslug, zlabel = sentiment.zone_for(row["composite"])
+    print(f"{row['date']}  composite={row['composite']:.1f} ({zlabel})  "
+         f"momentum={row['momentum']}  strength={row['strength']}  "
+         f"breadth={row['breadth']}  universe={row['universe_size']}")
 
 
 def cmd_history(args):
@@ -237,6 +250,8 @@ def main(argv=None):
 
     sub.add_parser("normalize").set_defaults(func=cmd_normalize)
     sub.add_parser("snapshot").set_defaults(func=cmd_snapshot)
+    sub.add_parser("sentiment", help="compute + store today's market mood reading") \
+       .set_defaults(func=cmd_sentiment)
 
     g = sub.add_parser("history", help="build point-in-time vintages")
     g.add_argument("--since", default="2015-01-01")
