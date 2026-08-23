@@ -143,10 +143,40 @@
       if (dateEl) dateEl.textContent = dateLabel || "";
     }
 
-    function build() {
+    // Creating the chart with a guessed initial width (canvas.clientWidth
+    // read synchronously, right as this element is scrolling into view via
+    // IntersectionObserver) and correcting it afterward via chart.resize()
+    // was the actual bug, not just a timing nuisance: the library's own
+    // internal pane-cell table layout doesn't reliably re-derive from a
+    // resize() call the way its outer wrapper does, leaving the inner
+    // viewport clipped to whatever width existed at creation time even
+    // after resize() reports success (confirmed by inspecting the DOM: the
+    // canvas's own raster width was correct, but its immediate parent cell
+    // stayed stuck at an old, much narrower width with overflow:hidden,
+    // clipping the visible chart down to that stale size). Fix: never
+    // guess -- wait for ResizeObserver's first callback, which the spec
+    // guarantees fires once with the container's real settled size, and
+    // build the chart with that from the very first frame instead of
+    // creating it wrong and trying to correct it after the fact.
+    var firstSizeResolve;
+    var sizeReady = new Promise(function (resolve) { firstSizeResolve = resolve; });
+
+    new ResizeObserver(function (entries) {
+      var box = entries[0].contentRect;
+      if (box.width <= 0 || box.height <= 0) return;
+      if (firstSizeResolve) {
+        firstSizeResolve({ width: box.width, height: box.height });
+        firstSizeResolve = null;
+      } else if (chart) {
+        chart.resize(box.width, box.height, true);
+        stretchToFill(chart, pointCount);
+      }
+    }).observe(canvas);
+
+    function build(width, height) {
       chart = LightweightCharts.createChart(canvas, {
-        width: canvas.clientWidth,
-        height: canvas.clientHeight,
+        width: width,
+        height: height,
         layout: {
           background: { type: "solid", color: "transparent" },
           textColor: css("--text-2"),
@@ -186,24 +216,6 @@
         priceScaleId: "left"
       });
 
-      // Deliberately not using the `autoSize` option. It installs its own
-      // internal ResizeObserver that resizes the canvas but does NOT re-fit
-      // the visible range afterwards -- it just grows the canvas and leaves
-      // the new room empty, which is the exact bug this replaces. A second,
-      // independent ResizeObserver calling fitContent() (the previous fix
-      // here) doesn't reliably win that race either: two separate observers
-      // on the same element fire in unspecified relative order, so ours
-      // could run before the library's own internal resize has actually
-      // applied the new width. Doing both steps ourselves, in one callback,
-      // in a guaranteed order, removes the race entirely.
-      new ResizeObserver(function (entries) {
-        var box = entries[0].contentRect;
-        if (box.width > 0 && box.height > 0) {
-          chart.resize(box.width, box.height);
-          stretchToFill(chart, pointCount);
-        }
-      }).observe(canvas);
-
       // Crosshair drives the legend, so the number under the cursor is always
       // the number being read, framed the same way as the idle state (change
       // vs. the start of the visible range) rather than switching metaphors.
@@ -232,14 +244,21 @@
       if (controller) controller.abort();
       controller = new AbortController();
 
-      return fetch("/api/chart/" + encodeURIComponent(ticker) + "?range=" + range,
-                   { signal: controller.signal })
-        .then(function (r) {
-          if (!r.ok) throw new Error(r.status === 404 ? "No price history" : "Couldn't load prices");
-          return r.json();
-        })
-        .then(function (d) {
-          if (!chart) build();
+      return Promise.all([
+        fetch("/api/chart/" + encodeURIComponent(ticker) + "?range=" + range,
+             { signal: controller.signal })
+          .then(function (r) {
+            if (!r.ok) throw new Error(r.status === 404 ? "No price history" : "Couldn't load prices");
+            return r.json();
+          }),
+        // Resolved once, by the first real ResizeObserver callback -- see
+        // the note above. Already resolved on every load() after the
+        // first, so this only actually waits on that very first call.
+        sizeReady,
+      ])
+        .then(function (results) {
+          var d = results[0], size = results[1];
+          if (!chart) build(size.width, size.height);
           chart.applyOptions({ timeScale: {
             tickMarkFormatter: range === "max" ? yearOnlyTickFormatter : defaultTickFormatter
           } });
