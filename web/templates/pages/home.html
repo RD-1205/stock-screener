@@ -35,26 +35,15 @@
 </section>
 
 {% if mood %}
-<section class="panel" style="margin-bottom:var(--sp-6)">
-  <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:var(--sp-2)">
-    <div>
-      <span class="mono" style="font-size:var(--fs-2xl);font-weight:var(--fw-medium)">{{ '%.0f'|format(mood.composite) }}</span>
-      <span style="font-size:var(--fs-lg);margin-left:var(--sp-2)">{{ mood.zone_label }}</span>
-    </div>
-    <span class="dim" style="font-size:var(--fs-sm)">Market mood · {{ mood.date }}</span>
+<section class="panel" style="margin-bottom:var(--sp-6);text-align:center">
+  <div class="row" style="justify-content:space-between;align-items:baseline">
+    <span class="dim" style="font-size:var(--fs-sm)">Market mood</span>
+    <span class="dim" style="font-size:var(--fs-sm)">{{ mood.date }}</span>
   </div>
-  <div class="mood-gauge">
-    <div class="mood-gauge-track">
-      <div class="mood-gauge-marker" style="left:{{ mood.composite }}%"></div>
-      <div class="mood-gauge-zone extreme-fear"></div>
-      <div class="mood-gauge-zone fear"></div>
-      <div class="mood-gauge-zone neutral"></div>
-      <div class="mood-gauge-zone greed"></div>
-      <div class="mood-gauge-zone extreme-greed"></div>
-    </div>
-    <div class="mood-gauge-labels">
-      <span>Extreme fear</span><span>Fear</span><span>Neutral</span><span>Greed</span><span>Extreme greed</span>
-    </div>
+  {{ mood_svg|safe }}
+  <div style="margin-top:calc(-1 * var(--sp-6))">
+    <span class="mono" style="font-size:var(--fs-3xl);font-weight:var(--fw-medium)">{{ '%.0f'|format(mood.composite) }}</span>
+    <div style="font-size:var(--fs-lg)">{{ mood.zone_label }}</div>
   </div>
   <p class="dim mono" style="font-size:var(--fs-xs);margin-top:var(--sp-3)">
     Momentum {{ '%.0f'|format(mood.momentum) if mood.momentum is not none else '—' }}
@@ -71,7 +60,7 @@
 
 <h2>Most active today</h2>
 {% if largest %}
-  <div class="panel table-scroll" style="padding:0;overflow:hidden">
+  <div class="panel table-scroll" style="padding:0">
     <table>
       <thead>
         <tr><th>Ticker</th><th>Company</th><th>Price</th><th>Change</th>

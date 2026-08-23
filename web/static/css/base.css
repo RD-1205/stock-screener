@@ -295,9 +295,25 @@ th {
   border-bottom: 1px solid var(--border); color: var(--text-2);
   font-weight: var(--fw-bold); font-size: var(--fs-xs);
   text-transform: uppercase; letter-spacing: var(--tracking-wide); white-space: nowrap;
+  /* Sticky, not just for long tables scrolling in place -- most of these
+     tables scroll with the page itself, and the sticky site header (56px,
+     --header-h) stays put above them, so the column header has to stick
+     right below it or a 200-row table loses its labels after one screen. */
+  position: sticky; top: var(--header-h); z-index: 2;
+  background: var(--surface-1);
 }
 th:first-child, th:nth-child(2), td:first-child, td:nth-child(2) { text-align: left; }
 th a { color: inherit; }
+
+/* .table-scroll panels used to clip their corners with overflow:hidden on
+   the wrapper -- which also silently disables position:sticky on every
+   descendant, since sticky can't escape a clipping ancestor. Round the
+   table's own corner cells instead so the panel still looks like a panel
+   without breaking the sticky header above. */
+.table-scroll thead tr:first-child th:first-child { border-top-left-radius: var(--radius-lg); }
+.table-scroll thead tr:first-child th:last-child { border-top-right-radius: var(--radius-lg); }
+.table-scroll tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius-lg); }
+.table-scroll tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius-lg); }
 td {
   padding: var(--cell-pad-y) var(--cell-pad-x);
   border-bottom: 1px solid var(--border-subtle);
@@ -434,27 +450,19 @@ tbody tr:hover { background: var(--surface-2); }
   text-anchor: middle; font-family: var(--font-mono);
 }
 
-/* --------------------------------------------------------------- mood gauge */
-.mood-gauge { margin: var(--sp-2) 0; }
-.mood-gauge-track {
-  position: relative; display: flex; height: 10px;
-  border-radius: var(--radius-pill); overflow: hidden;
-}
-.mood-gauge-zone { flex: 1; }
-.mood-gauge-zone.extreme-fear { background: var(--down); }
-.mood-gauge-zone.fear { background: var(--down); opacity: .5; }
-.mood-gauge-zone.neutral { background: var(--border-strong); }
-.mood-gauge-zone.greed { background: var(--up); opacity: .5; }
-.mood-gauge-zone.extreme-greed { background: var(--up); }
-.mood-gauge-marker {
-  position: absolute; top: -4px; width: 2px; height: 18px;
-  background: var(--text-1); transform: translateX(-1px); z-index: 1;
-}
-.mood-gauge-labels {
-  display: flex; justify-content: space-between; margin-top: var(--sp-1);
-  font-size: var(--fs-2xs); color: var(--text-3);
-  text-transform: uppercase; letter-spacing: var(--tracking-wide);
-}
+/* --------------------------------------------------------------- mood gauge
+   Semicircle dial: 5 coloured zone bands (same fear->greed order and
+   colours the linear version used) plus a needle at the current score.
+   Server-rendered SVG, same approach as the revenue bar_chart() above --
+   see web/app.py:mood_gauge_svg(). */
+.mood-dial { width: 100%; max-width: 320px; margin: 0 auto; }
+.mood-arc-extreme-fear { fill: var(--down); }
+.mood-arc-fear { fill: var(--down); opacity: .5; }
+.mood-arc-neutral { fill: var(--border-strong); }
+.mood-arc-greed { fill: var(--up); opacity: .5; }
+.mood-arc-extreme-greed { fill: var(--up); }
+.mood-needle { stroke: var(--text-1); stroke-width: 2.5; stroke-linecap: round; }
+.mood-needle-hub { fill: var(--text-1); }
 
 /* --------------------------------------------------------- price chart island */
 .chart-panel { padding: var(--sp-4); }
