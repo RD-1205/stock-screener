@@ -27,9 +27,13 @@ def setup():
         db.init(conn)
         seed_db(conn, fixtures)
         os.environ["SCREENER_DB"] = dbpath
-        os.environ.pop("FINNHUB_API_KEY", None)     # exercise the fallback
+        # Pop before *and* after importing the app: web.app loads .env via
+        # setdefault, which would otherwise re-inject a local Finnhub key and
+        # make these tests hit the network.
+        os.environ.pop("FINNHUB_API_KEY", None)
         from fastapi.testclient import TestClient
         from web.app import app
+        os.environ.pop("FINNHUB_API_KEY", None)
         _CACHE.update(client=TestClient(app), conn=conn)
     return _CACHE["client"], _CACHE["conn"]
 
@@ -70,6 +74,10 @@ def test_ranges_reduce_point_count():
         pts, meta = series.fetch(conn, "MODT", r, today=date(2025, 6, 30))
         counts[r] = len(pts)
         assert meta["range"] == r
+        assert "available_ranges" in meta
+        assert "partial" in meta
+    # Fixtures span ~4.5y of weekly bars — long enough that max still
+    # monthly-buckets and stays no denser than weekly 5y.
     assert counts["max"] <= counts["5y"], (
         f"max ({counts['max']}) should be no denser than 5y ({counts['5y']}) "
         "after monthly bucketing")
@@ -77,16 +85,52 @@ def test_ranges_reduce_point_count():
     print(f"  OK  point counts by range: {counts}")
 
 
+def test_short_history_stays_daily_on_max():
+    """Don't monthly-downsample a short MAX — that's denser-looking on 1Y
+    and empty-looking on MAX for the same underlying data."""
+    assert series.bucket_for_span(280, "month") == "day"
+    assert series.bucket_for_span(280, "week") == "day"
+    assert series.bucket_for_span(800, "month") == "week"
+    assert series.bucket_for_span(2000, "month") == "month"
+    assert series.available_ranges(280)["5y"] is False
+    assert series.available_ranges(500)["5y"] is True
+    print("  OK  adaptive bucketing demotes coarse buckets on short spans")
+
+
 def test_short_range_falls_back_rather_than_drawing_nothing():
     """Fixture prices are weekly, so a 1-month window can contain <2 points.
 
     An empty chart box looks broken. Falling back to the full history is the
-    honest degradation.
+    honest degradation — and the response must admit it was a fallback.
     """
     _, conn = setup()
-    pts, _ = series.fetch(conn, "MODT", "1m", today=date(2030, 1, 1))
+    pts, meta = series.fetch(conn, "MODT", "1m", today=date(2030, 1, 1))
     assert len(pts) >= 2, "sparse range should fall back to full history"
+    assert meta["fell_back"] is True
+    assert meta["partial"] is True
     print("  OK  sparse range falls back instead of rendering an empty chart")
+
+
+def test_apply_quote_tips_last_point():
+    points = [["2025-01-02", 100.0], ["2025-01-03", 110.0]]
+    meta = {"first": 100.0, "last": 110.0, "first_date": "2025-01-02",
+            "last_date": "2025-01-03", "quote_label": "At close",
+            "quote_source": "close"}
+    out, m = series.apply_quote(points, meta, {
+        "price": 112.5, "source": "finnhub", "label": "Delayed 15 min",
+        "as_of": "2025-01-03",
+    })
+    assert out[-1][1] == 112.5
+    assert m["quote_label"] == "Delayed 15 min"
+    assert m["live_tip"] is True
+    assert abs(m["change"] - 12.5) < 1e-9
+    # Close-source quote must not rewrite the series.
+    out2, m2 = series.apply_quote(points, meta, {
+        "price": 999.0, "source": "close", "label": "At close",
+    })
+    assert out2[-1][1] == 110.0
+    assert m2.get("live_tip") is not True
+    print("  OK  finnhub quote tips the chart; close quote leaves it alone")
 
 
 # ------------------------------------------------------------- API contract

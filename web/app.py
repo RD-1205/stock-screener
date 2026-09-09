@@ -34,6 +34,35 @@ from screener.concepts import METRICS                        # noqa: E402
 from web.content import legal                                # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+
+def _load_dotenv(path=None):
+    """Minimal .env loader — no python-dotenv dependency.
+
+    Only sets keys that aren't already in the environment, so a real shell
+    export always wins. .env is gitignored; used for local Finnhub etc.
+    """
+    path = path or os.path.join(ROOT, ".env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key:
+                    os.environ.setdefault(key, val)
+    except OSError:
+        return
+
+
+_load_dotenv()
+
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
 SITE_NAME = os.environ.get("SITE_NAME", "us-screener")
@@ -315,6 +344,15 @@ def screener(request: Request,
         # bare page is indexable. Curated screens live at /screens/{slug}.
         "noindex": bool(q or as_of),
         "header_note": None,
+        # Range-filter grid (P4): metric_columns maps a DSL alias ("revenue")
+        # to its real snapshot column ("revenue_ttm") so the template can
+        # look up placeholder ranges, which are keyed by column name.
+        "metric_columns": screen.COLUMNS,
+        "metric_labels": screen.METRIC_LABELS,
+        "metric_groups": screen.METRIC_GROUPS,
+        "metric_format": screen.METRIC_FORMAT,
+        "default_range_metrics": screen.DEFAULT_RANGE_METRICS,
+        "metric_ranges": screen.metric_ranges(conn),
     })
 
 
@@ -558,11 +596,46 @@ def coverage(request: Request):
             "SELECT source_concept, COUNT(DISTINCT cik) n FROM fundamentals "
             "WHERE metric=? GROUP BY source_concept ORDER BY n DESC LIMIT 4",
             (m.name,)).fetchall()
+
+        # The actual work queue: among companies that HAVE fundamentals but
+        # NOT this metric, which raw tags (not already on our candidate
+        # list) do they carry? A tag with a high company count here is a
+        # real gap in concepts.py, not noise -- see P6 in
+        # docs/PENDING-CHANGES.md.
+        #
+        # The naive version of this query is dominated by boilerplate every
+        # 10-K carries regardless (Assets, NetIncomeLoss, the three cash-flow
+        # classifications) -- those show up as the "top candidate" for
+        # EVERY thin metric, which is not a signal. Exclude anything
+        # reported by more than half the whole ingested universe; a tag
+        # that's genuinely an alternate spelling of a specific line item is
+        # used by the subset of filers who report that item, not by nearly
+        # everyone.
+        tried = m.concepts
+        boilerplate_threshold = total // 2
+        missing_tags = conn.execute(
+            f"""SELECT fc.concept, COUNT(DISTINCT fc.cik) n
+                FROM fact_concepts fc
+                WHERE fc.cik IN (SELECT DISTINCT cik FROM facts)
+                  AND fc.cik NOT IN (
+                      SELECT cik FROM fundamentals WHERE metric=?
+                  )
+                  AND fc.concept NOT IN ({','.join('?' * len(tried))})
+                  AND fc.taxonomy = 'us-gaap'
+                  AND fc.concept NOT IN (
+                      SELECT concept FROM fact_concepts
+                      GROUP BY concept HAVING COUNT(DISTINCT cik) > ?
+                  )
+                GROUP BY fc.concept
+                ORDER BY n DESC LIMIT 6""",
+            [m.name, *tried, boilerplate_threshold]).fetchall() if got < total else []
+
         rows.append({
             "metric": m.name, "kind": m.kind, "got": got, "total": total,
             "pct": 100.0 * got / total,
             "tags": [(t["source_concept"], t["n"]) for t in tags],
             "candidates": len(m.concepts),
+            "missing_tags": [(t["concept"], t["n"]) for t in missing_tags],
         })
     rows.sort(key=lambda r: r["pct"])
     return templates.TemplateResponse(request, "coverage.html", {
@@ -720,10 +793,16 @@ def api_chart(ticker: str, range: str = series.DEFAULT_RANGE):
     Points are arrays, not objects: [["2024-01-02", 185.64], ...] is about 40%
     smaller than the object form over a few thousand rows, and costs one map()
     on the client. At 10 years of history that's a real saving.
+
+    When Finnhub is configured, the last point is tipped to the delayed quote
+    so the chart end matches the company header.
     """
-    points, meta = series.fetch(get_conn(), ticker, range)
+    conn = get_conn()
+    points, meta = series.fetch(conn, ticker, range)
     if not points:
         raise HTTPException(404, f"No price history for {ticker.upper()}")
+    quote = quotes.get(conn, [ticker.upper()]).get(ticker.upper())
+    points, meta = series.apply_quote(points, meta, quote)
     return {"points": points, **meta}
 
 

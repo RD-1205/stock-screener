@@ -7,8 +7,22 @@
 <h1>{{ heading }}</h1>
 <p class="sub">{{ "{:,}".format(data.total) }} companies{% if subtitle %} · {{ subtitle }}{% endif %}</p>
 
+<div class="browse-toolbar">
+  <button type="button" class="btn btn-secondary" data-filters-toggle
+          aria-expanded="{{ 'true' if active_filters else 'false' }}" aria-controls="filters">
+    Filters{% if active_filters %} · {{ active_filters|length }}{% endif %}
+  </button>
+  {% if active_filters %}
+    <div class="row" style="gap:var(--sp-2)">
+      {% for label, href in active_filters %}
+        <a class="pill pill-accent" href="{{ href }}">{{ label }} ✕</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
 <div class="browse">
-  <aside class="browse-menu">
+  <aside class="browse-menu" id="filters" {% if not active_filters %}hidden{% endif %}>
     <div class="browse-group">
       <h3>Activity</h3>
       <ul>
@@ -65,14 +79,6 @@
   </aside>
 
   <div class="browse-results">
-    {% if active_filters %}
-      <div class="row" style="margin-bottom:var(--sp-3);gap:var(--sp-2)">
-        {% for label, href in active_filters %}
-          <a class="pill pill-accent" href="{{ href }}">{{ label }} ✕</a>
-        {% endfor %}
-      </div>
-    {% endif %}
-
     {% if data.rows %}
       <div class="panel table-scroll" style="padding:0">
         <table>

@@ -28,6 +28,7 @@
         <th>Coverage</th>
         <th style="width:180px"></th>
         <th style="text-align:left">Resolved from</th>
+        <th style="text-align:left">Missing companies carry</th>
       </tr>
     </thead>
     <tbody>
@@ -52,6 +53,15 @@
             {% else %}
               <span class="muted">nothing resolved &mdash;
                 {{ r.candidates }} candidate tag{{ '' if r.candidates == 1 else 's' }} tried</span>
+            {% endif %}
+          </td>
+          <td style="text-align:left;font-family:inherit">
+            {% if r.missing_tags %}
+              {% for tag, n in r.missing_tags %}
+                <span class="pill" title="{{ n }} of the missing companies use this tag instead">{{ tag }} ({{ n }})</span>
+              {% endfor %}
+            {% elif r.pct < 100 %}
+              <span class="muted">missing companies carry no other candidate tag &mdash; likely a real absence, not a mapping gap</span>
             {% endif %}
           </td>
         </tr>

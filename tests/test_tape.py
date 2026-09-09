@@ -30,9 +30,13 @@ def setup():
         db.init(conn)
         seed_db(conn, fixtures)
         os.environ["SCREENER_DB"] = dbpath
+        # Pop before *and* after importing the app: web.app loads .env via
+        # setdefault, which would otherwise re-inject a local Finnhub key and
+        # make these tests hit the network.
         os.environ.pop("FINNHUB_API_KEY", None)
         from fastapi.testclient import TestClient
         from web.app import app
+        os.environ.pop("FINNHUB_API_KEY", None)
         _CACHE.update(client=TestClient(app), conn=conn, db=dbpath)
     return _CACHE["client"], _CACHE["conn"]
 

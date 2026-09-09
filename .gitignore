@@ -14,6 +14,7 @@ _fixtures/
 fixtures/
 
 .env
+logs/
 .DS_Store
 .idea/
 .vscode/

@@ -34,6 +34,9 @@
       var icon = btn.querySelector("[data-theme-icon]");
       if (icon) icon.textContent = next === "dark" ? "☾" : "☀";
     });
+    // Chart island (and anything else that painted from CSS vars once) can
+    // recolor without a full reload.
+    window.dispatchEvent(new CustomEvent("ui:theme", { detail: { theme: next } }));
   }
 
   document.addEventListener("click", function (e) {
@@ -58,6 +61,19 @@
       if (field) { field.focus(); field.select(); }
       else { window.location.href = "/search"; }
     }
+  });
+
+  // ---- browse filters panel ---------------------------------------------
+  // Links always exist in the markup (crawlers see every filter regardless
+  // of panel state) -- this only toggles visibility, never builds the DOM.
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-filters-toggle]");
+    if (!t) return;
+    e.preventDefault();
+    var panel = document.getElementById(t.getAttribute("aria-controls"));
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    t.setAttribute("aria-expanded", panel.hidden ? "false" : "true");
   });
 
   document.addEventListener("click", function (e) {
