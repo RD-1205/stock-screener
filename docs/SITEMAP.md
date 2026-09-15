@@ -14,7 +14,7 @@ Legend: **Idx** = should search engines index it · **Auth** = requires login
 |---|---|---|---|
 | `/` | Landing — search, market pulse, filing news feed | ✅ | — |
 | `/screener` | The tool. Full state in the query string | ⚠️ base only | — |
-| `/stocks` | **A–Z hub of all companies.** Paginated, sector-filtered | ✅ | — |
+| `/stocks` | **Browse hub** — activity/sector/size first, alphabet demoted to a crawl-discovery filter (`?letter=X`), paginated | ✅ | — |
 | `/stocks/{ticker}` | Company overview, chart-first | ✅ | — |
 | `/stocks/{ticker}/financials` | Statements, interactive | ✅ | — |
 | `/stocks/{ticker}/shareholding` | 13F, 13D/G, insiders | ✅ | — |
@@ -130,6 +130,7 @@ canonical indexable version.
 | Pattern | Rule |
 |---|---|
 | `/stocks/*`, `/lists/*`, `/screens/*`, `/learn/*`, `/sectors/*` | Index, in sitemap |
+| `/stocks?letter=X` | **Index, in sitemap.** Not a duplicate of bare `/stocks` — it's a bounded (26-way) crawl-discovery partition of 5,000+ companies, the kind of page a search engine actually needs to reach everything. `?sort=`, `?sector=`, `?band=`, `?page=` combinations stay `noindex, follow` like `/screener?*` below — those partition the same data too many ways to be worth indexing separately. |
 | `/screener` bare | Index |
 | `/screener?*` | `noindex, follow` |
 | `/compare/*` curated | Index, in sitemap |

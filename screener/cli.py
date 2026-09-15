@@ -18,7 +18,31 @@ import os
 import sys
 from datetime import date
 
-from . import db, edgar, ingest, prices, screen, transform
+from . import db, edgar, ingest, prices, screen, sentiment, splits, transform
+
+
+def _load_dotenv():
+    """Same helper as web.app — keep CLI and server reading one .env."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, ".env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key:
+                    os.environ.setdefault(key, val)
+    except OSError:
+        return
+
+
+_load_dotenv()
 
 
 def _ua():
@@ -97,6 +121,8 @@ def cmd_prices(args):
         params = wanted
     elif args.only_ingested:
         q += " AND cik IN (SELECT cik FROM facts)"
+    if args.unpriced and not args.tickers:
+        q += " AND ticker NOT IN (SELECT DISTINCT ticker FROM prices)"
     q += " ORDER BY ticker"
     if args.limit and not args.tickers:
         q += f" LIMIT {int(args.limit)}"
@@ -114,6 +140,47 @@ def cmd_prices(args):
     print(f"{total:,} price bars")
 
 
+def cmd_splits(args):
+    """Backfill screener/splits.py detection for already-ingested companies.
+
+    New ingests detect splits automatically; this is only needed once, for
+    companies loaded before that wiring existed.
+    """
+    conn = db.connect(args.db)
+    ciks = [r[0] for r in conn.execute("SELECT DISTINCT cik FROM facts")]
+    n_events = splits.refresh_all(conn, ciks)
+    print(f"{len(ciks):,} companies scanned, {n_events:,} split events found")
+
+
+def cmd_census(args):
+    """Backfill the raw-tag census (screener/edgar.census_companyfacts) for
+    companies ingested before that wiring existed.
+
+    New ingests build this for free from the document they already fetch --
+    this re-fetches per company, since parse_companyfacts() never kept the
+    non-allowlisted tags to build it from after the fact.
+    """
+    conn = db.connect(args.db)
+    ua = _ua()
+    ciks = [r[0] for r in conn.execute(
+        "SELECT DISTINCT cik FROM facts WHERE cik NOT IN "
+        "(SELECT DISTINCT cik FROM fact_concepts)"
+    )]
+    print(f"census for {len(ciks):,} companies (~{len(ciks)*0.12:.0f}s at SEC rate limit)")
+    total = 0
+    for i, cik in enumerate(ciks, 1):
+        try:
+            doc = edgar.fetch_companyfacts(cik, ua)
+            total += len(ingest._store_census(conn, doc))
+        except Exception as e:                  # noqa: BLE001
+            print(f"  ! cik {cik}: {e}")
+        if i % 25 == 0:
+            conn.commit()
+            print(f"  {i}/{len(ciks)}")
+    conn.commit()
+    print(f"census built for {len(ciks):,} companies, {total:,} tag rows")
+
+
 def cmd_normalize(args):
     conn = db.connect(args.db)
     n = transform.normalize_all(conn)
@@ -124,6 +191,19 @@ def cmd_snapshot(args):
     conn = db.connect(args.db)
     n = transform.build_snapshot(conn)
     print(f"snapshot rebuilt for {n:,} companies")
+
+
+def cmd_sentiment(args):
+    conn = db.connect(args.db)
+    row = sentiment.compute(conn)
+    if not row:
+        print(f"not enough priced companies yet (need >= {sentiment.MIN_UNIVERSE})")
+        return
+    sentiment.store(conn, row)
+    zslug, zlabel = sentiment.zone_for(row["composite"])
+    print(f"{row['date']}  composite={row['composite']:.1f} ({zlabel})  "
+         f"momentum={row['momentum']}  strength={row['strength']}  "
+         f"breadth={row['breadth']}  universe={row['universe_size']}")
 
 
 def cmd_history(args):
@@ -233,10 +313,18 @@ def main(argv=None):
     g.add_argument("--tickers", help="comma-separated tickers, e.g. AAPL,MSFT (overrides --limit)")
     g.add_argument("--provider", choices=["stooq", "eodhd"], default="stooq")
     g.add_argument("--only-ingested", action="store_true", default=True)
+    g.add_argument("--unpriced", action="store_true",
+                    help="skip tickers that already have rows in the prices table")
     g.set_defaults(func=cmd_prices)
 
+    sub.add_parser("splits", help="backfill split detection for already-ingested companies") \
+       .set_defaults(func=cmd_splits)
+    sub.add_parser("census", help="backfill the raw-tag census for /coverage's work queue") \
+       .set_defaults(func=cmd_census)
     sub.add_parser("normalize").set_defaults(func=cmd_normalize)
     sub.add_parser("snapshot").set_defaults(func=cmd_snapshot)
+    sub.add_parser("sentiment", help="compute + store today's market mood reading") \
+       .set_defaults(func=cmd_sentiment)
 
     g = sub.add_parser("history", help="build point-in-time vintages")
     g.add_argument("--since", default="2015-01-01")

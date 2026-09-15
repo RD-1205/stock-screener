@@ -55,8 +55,6 @@ SORTS = {
     "mcap": ("Market cap", "market_cap DESC"),
     "gainers": ("Top gainers", "change_pct DESC"),
     "losers": ("Top losers", "change_pct ASC"),
-    "ticker": ("Ticker A–Z", "ticker ASC"),
-    "name": ("Name A–Z", "name ASC"),
     "pe_low": ("Lowest P/E", "pe ASC"),
     "roe_high": ("Highest ROE", "roe DESC"),
 }
@@ -231,7 +229,7 @@ def browse(conn, sector=None, band=None, index=None, letter=None,
                             .replace('ticker', 's.ticker')
                             .replace('name', 's.name')
                             .replace('pe', 's.pe')
-                            .replace('roe', 's.roe')} NULLS LAST
+                            .replace('roe', 's.roe')} NULLS LAST, s.ticker ASC
             LIMIT ? OFFSET ?""",
         params + [per_page, (max(page, 1) - 1) * per_page],
     ).fetchall()

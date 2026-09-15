@@ -3,9 +3,10 @@
 
 {% block content %}
 {#
-  Landing shell. The market pulse band (R5/R6) and the filing news feed (R1)
-  slot in above and below the search respectively at build step 6. Everything
-  shown here is real data -- no placeholder numbers.
+  Landing shell. The mood gauge (R6) is real, computed from our own price
+  data -- see screener/sentiment.py. The market news feed (R1) is real too --
+  see screener/news.py. Everything shown here is real data -- no placeholder
+  numbers.
 #}
 
 <section style="text-align:center;padding:var(--sp-7) 0 var(--sp-6)">
@@ -34,9 +35,38 @@
   {% endif %}
 </section>
 
+{% if mood %}
+<section class="panel" style="margin-bottom:var(--sp-6);text-align:center">
+  <div class="row" style="justify-content:space-between;align-items:baseline">
+    <span class="dim" style="font-size:var(--fs-sm)">Market mood</span>
+    <span class="dim" style="font-size:var(--fs-sm)">{{ mood.date }}</span>
+  </div>
+  {{ mood_svg|safe }}
+  <div style="margin-top:calc(-1 * var(--sp-6))">
+    <span class="mono" style="font-size:var(--fs-3xl);font-weight:var(--fw-medium)">{{ '%.0f'|format(mood.composite) }}</span>
+    <div style="font-size:var(--fs-lg)">{{ mood.zone_label }}</div>
+  </div>
+  <p id="mood-zone-caption" class="dim" style="font-size:var(--fs-sm);min-height:2.6em;
+     margin:var(--sp-2) auto 0;max-width:36em" data-default-label="{{ mood.zone_label }}"
+     data-default-desc="{{ zone_description(mood.zone_slug) }}">
+    <strong>{{ mood.zone_label }}</strong> — {{ zone_description(mood.zone_slug) }}
+  </p>
+  <p class="dim mono" style="font-size:var(--fs-xs);margin-top:var(--sp-3)">
+    Momentum {{ '%.0f'|format(mood.momentum) if mood.momentum is not none else '—' }}
+    · Strength {{ '%.0f'|format(mood.strength) if mood.strength is not none else '—' }}
+    · Breadth {{ '%.0f'|format(mood.breadth) if mood.breadth is not none else '—' }}
+  </p>
+  <p class="dim" style="font-size:var(--fs-xs);margin-top:var(--sp-1)">
+    Computed from {{ mood.universe_size }} priced companies —
+    {{ mood.components.available_of_7 }} of 7 CNN-style components available so far.
+    <a href="/methodology#mood">How this is computed →</a>
+  </p>
+</section>
+{% endif %}
+
 <h2>Most active today</h2>
 {% if largest %}
-  <div class="panel table-scroll" style="padding:0;overflow:hidden">
+  <div class="panel table-scroll" style="padding:0">
     <table>
       <thead>
         <tr><th>Ticker</th><th>Company</th><th>Price</th><th>Change</th>
@@ -67,14 +97,29 @@
            "/coverage", "See data coverage") }}
 {% endif %}
 
-<h2>Start from a screen</h2>
-<div class="grid">
-  {% for label, query in examples %}
-    <a class="stat" href="/screener?q={{ query|urlencode }}" style="display:block">
-      <div class="k">{{ label }}</div>
-      <div class="mono" style="font-size:var(--fs-sm);color:var(--text-2);margin-top:var(--sp-1)">{{ query }}</div>
-    </a>
-  {% endfor %}
-</div>
-<p style="margin-top:var(--sp-3)"><a href="/screens">All screens →</a></p>
+<h2>Market news</h2>
+{% if headlines %}
+  <div class="panel" style="padding:0">
+    <ul style="list-style:none;margin:0;padding:0">
+      {% for h in headlines %}
+        <li style="padding:var(--sp-3) var(--sp-4);
+            {% if not loop.last %}border-bottom:1px solid var(--border){% endif %}">
+          <a href="{{ h.url }}" target="_blank" rel="noopener nofollow"
+             style="color:var(--text-1);font-weight:var(--fw-medium)">{{ h.headline }}</a>
+          <div class="dim mono" style="font-size:var(--fs-xs);margin-top:var(--sp-1)">
+            {{ h.source }}{% if h.datetime %} · {{ h.datetime.strftime('%b %d, %H:%M UTC') }}{% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <p class="dim" style="font-size:var(--fs-sm);margin-top:var(--sp-3)">
+    Headlines link out to the original source, via Finnhub.
+    <a href="/methodology#news">How this works →</a>
+  </p>
+{% else %}
+  {{ empty("No news feed configured",
+           "Set FINNHUB_API_KEY to enable market headlines.",
+           "/methodology#news", "Read the methodology") }}
+{% endif %}
 {% endblock %}

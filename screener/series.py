@@ -8,11 +8,15 @@ Downsampling matters more than it looks. Ten years of daily bars is ~2,500
 points being rendered into ~700 pixels — you ship 3.5x the bytes to draw the
 same picture, and the client does 3.5x the work laying it out. Bucketing
 server-side is a few lines and cuts the payload by more than half.
+
+Bucket choice follows *actual* span, not just the button. Monthly MAX on ten
+months of Stooq history made the longest range look worse than 1Y; that was
+a lie dressed as a chart.
 """
 
 from datetime import date, timedelta
 
-# range key -> (days back or None for everything, bucket)
+# range key -> (days back or None for everything, preferred bucket)
 #
 # No "1d" -- prices are end-of-day only (no intraday data), so a single
 # calendar day is at most one point. That's not a chart, and faking one would
@@ -27,6 +31,10 @@ RANGES = {
     "max": (None,  "month"),
 }
 DEFAULT_RANGE = "1y"
+
+# Spans below these keep denser buckets even when the button asked for coarser.
+_SPAN_DAY_MAX = 400          # ≤ ~13 months → always daily
+_SPAN_WEEK_MAX = 1400        # ≤ ~4 years → week, never month
 
 
 def _bucket_key(iso, bucket):
@@ -61,6 +69,42 @@ def downsample(rows, bucket):
     return out
 
 
+def _span_days(rows):
+    if len(rows) < 2:
+        return 0
+    return (date.fromisoformat(rows[-1][0]) - date.fromisoformat(rows[0][0])).days
+
+
+def bucket_for_span(span_days, preferred):
+    """Demote coarse buckets when the series isn't long enough to need them."""
+    if span_days < 2:
+        return "day"
+    if span_days <= _SPAN_DAY_MAX:
+        return "day"
+    if span_days <= _SPAN_WEEK_MAX:
+        if preferred == "month":
+            return "week"
+        return preferred if preferred in ("day", "week") else "week"
+    return preferred
+
+
+def available_ranges(span_days):
+    """Which range tabs are meaningful given how much history we hold.
+
+    Shorter tabs stay on so a thin history still has somewhere to click;
+    5Y greys out until we have enough calendar span that it isn't just 1Y
+    redrawn under a different label.
+    """
+    return {
+        "5d": True,
+        "1m": True,
+        "6m": span_days >= 45,
+        "1y": span_days >= 90,
+        "5y": span_days >= _SPAN_DAY_MAX,
+        "max": True,
+    }
+
+
 def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
     """Return (points, meta) for a ticker.
 
@@ -69,18 +113,20 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
     client.
     """
     range_key = range_key if range_key in RANGES else DEFAULT_RANGE
-    days, bucket = RANGES[range_key]
+    days, preferred = RANGES[range_key]
+    as_of = today or date.today()
 
     sql = ("SELECT date, close FROM prices "
            "WHERE ticker = ? AND close IS NOT NULL")
     params = [ticker.upper()]
     if days is not None:
-        cutoff = (today or date.today()) - timedelta(days=days)
+        cutoff = as_of - timedelta(days=days)
         sql += " AND date >= ?"
         params.append(cutoff.isoformat())
     sql += " ORDER BY date ASC"
 
     rows = [(r[0], r[1]) for r in conn.execute(sql, params)]
+    fell_back = False
 
     # A short range on a sparse history can return one point or none, which
     # draws nothing. Fall back to everything we have rather than an empty box.
@@ -88,15 +134,46 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
         rows = [(r[0], r[1]) for r in conn.execute(
             "SELECT date, close FROM prices WHERE ticker = ? "
             "AND close IS NOT NULL ORDER BY date ASC", (ticker.upper(),))]
-        bucket = "week"
+        fell_back = True
 
+    # Full-history span drives which tabs are honest, even when this request
+    # asked for a windowed slice.
+    full = conn.execute(
+        "SELECT MIN(date), MAX(date) FROM prices "
+        "WHERE ticker = ? AND close IS NOT NULL", (ticker.upper(),)
+    ).fetchone()
+    if full and full[0] and full[1]:
+        full_span = (date.fromisoformat(full[1]) - date.fromisoformat(full[0])).days
+    else:
+        full_span = _span_days(rows)
+
+    span = _span_days(rows)
+    bucket = bucket_for_span(span, preferred)
     points = downsample(rows, bucket)
+
+    # partial: the button promised a longer window than the data can fill,
+    # or we had to abandon the window entirely to draw anything.
+    # MAX with no day-cutoff still counts as partial when full history is
+    # shorter than what "MAX" implies to a reader (~5y+ of prices).
+    requested_days = days if days is not None else None
+    partial = fell_back or (
+        requested_days is not None and span > 0 and span < requested_days * 0.85
+    )
+    if range_key == "max" and full_span < _SPAN_WEEK_MAX:
+        partial = True
 
     meta = {
         "ticker": ticker.upper(),
         "range": range_key,
         "bucket": bucket,
         "count": len(points),
+        "span_days": span,
+        "full_span_days": full_span,
+        "partial": partial,
+        "fell_back": fell_back,
+        "available_ranges": available_ranges(full_span),
+        "quote_label": "At close",
+        "quote_source": "close",
     }
     if points:
         first, last = points[0][1], points[-1][1]
@@ -109,6 +186,47 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
             high=max(p[1] for p in points),
         )
     return points, meta
+
+
+def apply_quote(points, meta, quote):
+    """Overlay a delayed quote onto the series so the chart ends where the
+    header does.
+
+    EOD history stays the body of the line; only the tip moves. Label stays
+    honest (Delayed 15 min vs At close). No-ops when quote is missing or is
+    itself just the last close.
+    """
+    if not points or not quote:
+        return points, meta
+    meta = dict(meta)
+    meta["quote_label"] = quote.get("label") or meta.get("quote_label") or "At close"
+    meta["quote_source"] = quote.get("source") or "close"
+    if quote.get("source") != "finnhub" or quote.get("price") is None:
+        return points, meta
+
+    price = float(quote["price"])
+    tip_date = quote.get("as_of") or meta.get("last_date") or date.today().isoformat()
+    if len(tip_date) > 10:
+        tip_date = tip_date[:10]
+
+    out = [list(p) for p in points]
+    if out[-1][0] >= tip_date:
+        out[-1][1] = price
+    else:
+        out.append([tip_date, price])
+
+    first, last = out[0][1], out[-1][1]
+    meta.update(
+        last=last,
+        last_date=out[-1][0],
+        change=last - first,
+        change_pct=((last / first - 1) * 100.0) if first else None,
+        low=min(p[1] for p in out),
+        high=max(p[1] for p in out),
+        count=len(out),
+        live_tip=True,
+    )
+    return out, meta
 
 
 def latest_change(conn, ticker):

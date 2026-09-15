@@ -295,9 +295,25 @@ th {
   border-bottom: 1px solid var(--border); color: var(--text-2);
   font-weight: var(--fw-bold); font-size: var(--fs-xs);
   text-transform: uppercase; letter-spacing: var(--tracking-wide); white-space: nowrap;
+  /* Sticky, not just for long tables scrolling in place -- most of these
+     tables scroll with the page itself, and the sticky site header (56px,
+     --header-h) stays put above them, so the column header has to stick
+     right below it or a 200-row table loses its labels after one screen. */
+  position: sticky; top: var(--header-h); z-index: 2;
+  background: var(--surface-1);
 }
 th:first-child, th:nth-child(2), td:first-child, td:nth-child(2) { text-align: left; }
 th a { color: inherit; }
+
+/* .table-scroll panels used to clip their corners with overflow:hidden on
+   the wrapper -- which also silently disables position:sticky on every
+   descendant, since sticky can't escape a clipping ancestor. Round the
+   table's own corner cells instead so the panel still looks like a panel
+   without breaking the sticky header above. */
+.table-scroll thead tr:first-child th:first-child { border-top-left-radius: var(--radius-lg); }
+.table-scroll thead tr:first-child th:last-child { border-top-right-radius: var(--radius-lg); }
+.table-scroll tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius-lg); }
+.table-scroll tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius-lg); }
 td {
   padding: var(--cell-pad-y) var(--cell-pad-x);
   border-bottom: 1px solid var(--border-subtle);
@@ -434,6 +450,22 @@ tbody tr:hover { background: var(--surface-2); }
   text-anchor: middle; font-family: var(--font-mono);
 }
 
+/* --------------------------------------------------------------- mood gauge
+   Semicircle dial: 5 coloured zone bands (same fear->greed order and
+   colours the linear version used) plus a needle at the current score.
+   Server-rendered SVG, same approach as the revenue bar_chart() above --
+   see web/app.py:mood_gauge_svg(). */
+.mood-dial { width: 100%; max-width: 320px; margin: 0 auto; }
+.mood-arc { cursor: pointer; transition: opacity .12s ease; outline: none; }
+.mood-arc-extreme-fear { fill: var(--down); }
+.mood-arc-fear { fill: var(--down); opacity: .5; }
+.mood-arc-neutral { fill: var(--border-strong); }
+.mood-arc-greed { fill: var(--up); opacity: .5; }
+.mood-arc-extreme-greed { fill: var(--up); }
+.mood-arc:hover, .mood-arc:focus-visible, .mood-arc.is-active { opacity: 1 !important; }
+.mood-needle { stroke: var(--text-1); stroke-width: 2.5; stroke-linecap: round; }
+.mood-needle-hub { fill: var(--text-1); }
+
 /* --------------------------------------------------------- price chart island */
 .chart-panel { padding: var(--sp-4); }
 
@@ -477,6 +509,11 @@ tbody tr:hover { background: var(--surface-2); }
 .range-tab:hover { color: var(--text-1); background: none; }
 .range-tab[aria-pressed="true"] {
   color: var(--accent); border-bottom-color: var(--accent);
+}
+.range-tab:disabled,
+.range-tab[aria-disabled="true"] {
+  color: var(--text-3); opacity: .4; cursor: not-allowed;
+  border-bottom-color: transparent;
 }
 
 /* -------------------------------------------------------------------- htmx */
@@ -530,8 +567,21 @@ tbody tr:hover { background: var(--surface-2); }
    dropdowns because the filters compose -- sector AND size AND index -- and
    dropdowns hide what's currently applied.
    -------------------------------------------------------------------------- */
-.browse { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--sp-5); }
-.browse-menu { font-size: var(--fs-md); }
+/* Filters live in a collapsible bar above the results, not a permanent
+   sidebar -- most visits arrive via search or a link and never touch a
+   filter, so a wide fixed rail was cost paid on every page view. */
+.browse { display: block; }
+.browse-toolbar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.browse-menu {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-4); font-size: var(--fs-md);
+  padding-bottom: var(--sp-4); margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+/* Same specificity as the rule above, later in the cascade, so `display:
+   grid` would otherwise beat the UA default and the [hidden] attribute
+   would silently do nothing. */
+.browse-menu[hidden] { display: none; }
 .browse-group { margin-bottom: var(--sp-5); }
 .browse-group h3 {
   font-size: var(--fs-xs); text-transform: uppercase;
@@ -559,11 +609,45 @@ tbody tr:hover { background: var(--surface-2); }
 }
 .alpha a[aria-current="true"] { background: var(--accent-bg); color: var(--accent); }
 
-@media (max-width: 860px) {
-  .browse { grid-template-columns: 1fr; }
-  .browse-menu {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: var(--sp-4); padding-bottom: var(--sp-4);
-    border-bottom: 1px solid var(--border);
-  }
+/* ------------------------------------------------------------- range grid */
+.range-grid { display: flex; flex-direction: column; gap: var(--sp-2); }
+.range-grid-head, .range-row {
+  display: grid; grid-template-columns: minmax(120px, 1fr) 140px 140px 28px;
+  gap: var(--sp-3); align-items: center;
+}
+.range-grid-head span {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+  color: var(--text-3); font-weight: var(--fw-bold);
+}
+.range-row-label { font-size: var(--fs-sm); color: var(--text-2); }
+.range-row input { width: 100%; }
+.range-row-remove {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  font-size: var(--fs-md); padding: var(--sp-1); line-height: 1;
+}
+.range-row-remove:hover { color: var(--bad); }
+
+.dropdown-menu {
+  position: absolute; top: calc(100% + var(--sp-1)); left: 0; z-index: 20;
+  background: var(--surface-1); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: var(--sp-3);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  display: flex; gap: var(--sp-4); flex-wrap: wrap; min-width: 320px;
+}
+.dropdown-menu[hidden] { display: none; }
+.dropdown-group h4 {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+  color: var(--text-3); margin: 0 0 var(--sp-2);
+}
+.dropdown-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  color: var(--text-2); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm);
+  cursor: pointer; font-size: var(--fs-sm); font-family: inherit;
+}
+.dropdown-item:hover { background: var(--surface-2); color: var(--text-1); }
+
+@media (max-width: 640px) {
+  .range-grid-head { display: none; }
+  .range-row { grid-template-columns: 1fr 1fr 28px; }
+  .range-row-label { grid-column: 1 / -1; }
 }

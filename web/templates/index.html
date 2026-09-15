@@ -3,36 +3,77 @@
 {% block content %}
 <h1>Screen US equities</h1>
 <p class="sub">
-  Fundamentals parsed from SEC EDGAR XBRL filings. Type a query, or replay it
-  against a historical date to see what it would have returned then.
+  Fundamentals parsed from SEC EDGAR XBRL filings. Set a range per metric, or
+  switch to text for anything a range can't express — then replay it against
+  a historical date to see what it would have returned then.
 </p>
 
 <div class="panel">
-  <form class="row" hx-get="/results" hx-target="#results" hx-swap="innerHTML"
+  <form hx-get="/results" hx-target="#results" hx-swap="innerHTML"
         hx-push-url="false" hx-trigger="submit, change from:#as_of">
-    <input type="text" name="q" id="q" value="{{ q }}" autocomplete="off"
-           placeholder="roe > 15 and pe < 25 and debt_to_equity < 1">
-    <select name="as_of" id="as_of" title="Point-in-time vintage">
-      <option value="">Today (live)</option>
-      {% for v in vintages %}
-        <option value="{{ v }}" {% if v == as_of %}selected{% endif %}>As of {{ v }}</option>
-      {% endfor %}
-    </select>
-    <input type="hidden" name="order" value="{{ order }}">
-    <input type="hidden" name="dir" value="{{ dir }}">
-    <input type="hidden" name="limit" value="{{ limit }}">
-    <button type="submit">Run</button>
-  </form>
 
-  <div class="chips">
-    {% for label, query in examples %}
-      <span class="chip"
-            onclick="document.getElementById('q').value={{ query|tojson }};
-                     htmx.trigger(document.querySelector('form'),'submit')">
-        {{ label }}
-      </span>
-    {% endfor %}
-  </div>
+    <div id="range-section" {% if q %}hidden{% endif %}>
+      <div class="range-grid" id="range-grid">
+        <div class="range-grid-head">
+          <span>Metric</span><span>Min</span><span>Max</span><span></span>
+        </div>
+        {% for key in default_range_metrics %}
+          {% set col = metric_columns[key] %}
+          {% set r = metric_ranges.get(col) %}
+          {% set fmt = metric_format.get(key, 'num') %}
+          <div class="range-row" data-metric="{{ key }}">
+            <span class="range-row-label">{{ metric_labels.get(key, key) }}</span>
+            <input type="text" inputmode="decimal" class="range-min"
+                   placeholder="{{ render_cell(r[0], fmt) if r else 'min' }}">
+            <input type="text" inputmode="decimal" class="range-max"
+                   placeholder="{{ render_cell(r[1], fmt) if r else 'max' }}">
+            <button type="button" class="range-row-remove"
+                    aria-label="Remove {{ metric_labels.get(key, key) }} filter">✕</button>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="row" style="position:relative;margin-top:var(--sp-3)">
+        <button type="button" class="btn btn-secondary" data-add-metric-toggle>+ Add metric ▾</button>
+        <div class="dropdown-menu" data-add-metric-menu hidden>
+          {% for group, keys in metric_groups %}
+            <div class="dropdown-group">
+              <h4>{{ group }}</h4>
+              {% for key in keys %}
+                <button type="button" class="dropdown-item" data-add-metric="{{ key }}"
+                        data-label="{{ metric_labels.get(key, key) }}"
+                        data-min-placeholder="{% set col = metric_columns[key] %}{% set r = metric_ranges.get(col) %}{{ render_cell(r[0], metric_format.get(key,'num')) if r else 'min' }}"
+                        data-max-placeholder="{% set col = metric_columns[key] %}{% set r = metric_ranges.get(col) %}{{ render_cell(r[1], metric_format.get(key,'num')) if r else 'max' }}">
+                  {{ metric_labels.get(key, key) }}
+                </button>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <input type="text" name="q" id="q" value="{{ q }}" autocomplete="off"
+           {% if not q %}hidden{% endif %}
+           placeholder="roe > 15 and pe < 25 and debt_to_equity < 1">
+
+    <div class="row" style="gap:var(--sp-3);margin-top:var(--sp-3)">
+      <button type="button" class="btn btn-secondary" data-advanced-toggle
+              aria-expanded="{{ 'true' if q else 'false' }}" aria-controls="q">
+        {{ 'Back to ranges' if q else 'Advanced: edit as text' }}
+      </button>
+      <select name="as_of" id="as_of" title="Point-in-time vintage">
+        <option value="">Today (live)</option>
+        {% for v in vintages %}
+          <option value="{{ v }}" {% if v == as_of %}selected{% endif %}>As of {{ v }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="order" value="{{ order }}">
+      <input type="hidden" name="dir" value="{{ dir }}">
+      <input type="hidden" name="limit" value="{{ limit }}">
+      <button type="submit" style="margin-left:auto">Run screen</button>
+    </div>
+  </form>
 
   {% if not vintages %}
     <div class="note">
@@ -42,6 +83,28 @@
       date, using only filings that existed then.
     </div>
   {% endif %}
+</div>
+
+<h2>Ready-made screens</h2>
+<p class="sub">Ready-made starting points. Run one here, or open its permanent link.</p>
+<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">
+  {% for c in screens %}
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:var(--sp-2)">
+        <strong style="font-size:var(--fs-sm)">{{ c.label }}</strong>
+        <span class="dim mono" style="font-size:var(--fs-xs);white-space:nowrap">
+          {% if c.count is not none %}{{ c.count }} matches{% else %}—{% endif %}
+        </span>
+      </div>
+      <code class="mono" style="display:block;font-size:var(--fs-xs);color:var(--text-3);
+            background:var(--surface-2);border-radius:var(--radius-sm);
+            padding:var(--sp-2);margin:var(--sp-2) 0;word-break:break-word">{{ c.query }}</code>
+      <div class="row" style="gap:var(--sp-2)">
+        <button type="button" class="chip" data-example-q="{{ c.query }}" style="flex:1">Run here</button>
+        <a class="btn btn-secondary" href="/screens/{{ c.slug }}" title="Permanent link to this screen">Permalink</a>
+      </div>
+    </div>
+  {% endfor %}
 </div>
 
 <h2>Results</h2>
@@ -61,4 +124,8 @@
     {% for f in fields %}<span class="pill">{{ f }}</span>{% endfor %}
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='js/ranges.js') }}?v={{ static_version('js/ranges.js') }}" defer></script>
 {% endblock %}

@@ -34,6 +34,9 @@
       var icon = btn.querySelector("[data-theme-icon]");
       if (icon) icon.textContent = next === "dark" ? "☾" : "☀";
     });
+    // Chart island (and anything else that painted from CSS vars once) can
+    // recolor without a full reload.
+    window.dispatchEvent(new CustomEvent("ui:theme", { detail: { theme: next } }));
   }
 
   document.addEventListener("click", function (e) {
@@ -47,6 +50,45 @@
     if (m) { e.preventDefault(); setPref("data-motion", KEYS.motion, m.dataset.setMotion); }
   });
 
+  // ---- mood gauge: hover/tap/focus a colour to see what it means --------
+  (function () {
+    var caption = document.getElementById("mood-zone-caption");
+    if (!caption) return;
+    var arcs = document.querySelectorAll(".mood-arc");
+    var defaultLabel = caption.dataset.defaultLabel;
+    var defaultDesc = caption.dataset.defaultDesc;
+
+    function setCaption(label, desc) {
+      caption.textContent = "";
+      var strong = document.createElement("strong");
+      strong.textContent = label;
+      caption.append(strong, " — " + desc);
+    }
+
+    function show(arc) {
+      arcs.forEach(function (a) { a.classList.toggle("is-active", a === arc); });
+      setCaption(arc.dataset.zoneLabel, arc.dataset.zoneDesc);
+    }
+
+    function reset() {
+      arcs.forEach(function (a) { a.classList.remove("is-active"); });
+      setCaption(defaultLabel, defaultDesc);
+    }
+
+    arcs.forEach(function (arc) {
+      arc.addEventListener("mouseenter", function () { show(arc); });
+      arc.addEventListener("focus", function () { show(arc); });
+      arc.addEventListener("mouseleave", reset);
+      arc.addEventListener("blur", reset);
+      // Tap-to-pin on touch: a second tap on the same zone (or elsewhere)
+      // returns to today's actual reading rather than staying stuck.
+      arc.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (arc.classList.contains("is-active")) reset(); else show(arc);
+      });
+    });
+  })();
+
   // ---- search palette placeholder --------------------------------------
   // Wired properly in build step 2 (R2). For now Cmd/Ctrl-K focuses the hero
   // search if it's on the page, otherwise navigates to /search. Shipping the
@@ -58,6 +100,19 @@
       if (field) { field.focus(); field.select(); }
       else { window.location.href = "/search"; }
     }
+  });
+
+  // ---- browse filters panel ---------------------------------------------
+  // Links always exist in the markup (crawlers see every filter regardless
+  // of panel state) -- this only toggles visibility, never builds the DOM.
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-filters-toggle]");
+    if (!t) return;
+    e.preventDefault();
+    var panel = document.getElementById(t.getAttribute("aria-controls"));
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    t.setAttribute("aria-expanded", panel.hidden ? "false" : "true");
   });
 
   document.addEventListener("click", function (e) {

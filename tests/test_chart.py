@@ -27,9 +27,13 @@ def setup():
         db.init(conn)
         seed_db(conn, fixtures)
         os.environ["SCREENER_DB"] = dbpath
-        os.environ.pop("FINNHUB_API_KEY", None)     # exercise the fallback
+        # Pop before *and* after importing the app: web.app loads .env via
+        # setdefault, which would otherwise re-inject a local Finnhub key and
+        # make these tests hit the network.
+        os.environ.pop("FINNHUB_API_KEY", None)
         from fastapi.testclient import TestClient
         from web.app import app
+        os.environ.pop("FINNHUB_API_KEY", None)
         _CACHE.update(client=TestClient(app), conn=conn)
     return _CACHE["client"], _CACHE["conn"]
 
@@ -70,6 +74,10 @@ def test_ranges_reduce_point_count():
         pts, meta = series.fetch(conn, "MODT", r, today=date(2025, 6, 30))
         counts[r] = len(pts)
         assert meta["range"] == r
+        assert "available_ranges" in meta
+        assert "partial" in meta
+    # Fixtures span ~4.5y of weekly bars — long enough that max still
+    # monthly-buckets and stays no denser than weekly 5y.
     assert counts["max"] <= counts["5y"], (
         f"max ({counts['max']}) should be no denser than 5y ({counts['5y']}) "
         "after monthly bucketing")
@@ -77,16 +85,52 @@ def test_ranges_reduce_point_count():
     print(f"  OK  point counts by range: {counts}")
 
 
+def test_short_history_stays_daily_on_max():
+    """Don't monthly-downsample a short MAX — that's denser-looking on 1Y
+    and empty-looking on MAX for the same underlying data."""
+    assert series.bucket_for_span(280, "month") == "day"
+    assert series.bucket_for_span(280, "week") == "day"
+    assert series.bucket_for_span(800, "month") == "week"
+    assert series.bucket_for_span(2000, "month") == "month"
+    assert series.available_ranges(280)["5y"] is False
+    assert series.available_ranges(500)["5y"] is True
+    print("  OK  adaptive bucketing demotes coarse buckets on short spans")
+
+
 def test_short_range_falls_back_rather_than_drawing_nothing():
     """Fixture prices are weekly, so a 1-month window can contain <2 points.
 
     An empty chart box looks broken. Falling back to the full history is the
-    honest degradation.
+    honest degradation — and the response must admit it was a fallback.
     """
     _, conn = setup()
-    pts, _ = series.fetch(conn, "MODT", "1m", today=date(2030, 1, 1))
+    pts, meta = series.fetch(conn, "MODT", "1m", today=date(2030, 1, 1))
     assert len(pts) >= 2, "sparse range should fall back to full history"
+    assert meta["fell_back"] is True
+    assert meta["partial"] is True
     print("  OK  sparse range falls back instead of rendering an empty chart")
+
+
+def test_apply_quote_tips_last_point():
+    points = [["2025-01-02", 100.0], ["2025-01-03", 110.0]]
+    meta = {"first": 100.0, "last": 110.0, "first_date": "2025-01-02",
+            "last_date": "2025-01-03", "quote_label": "At close",
+            "quote_source": "close"}
+    out, m = series.apply_quote(points, meta, {
+        "price": 112.5, "source": "finnhub", "label": "Delayed 15 min",
+        "as_of": "2025-01-03",
+    })
+    assert out[-1][1] == 112.5
+    assert m["quote_label"] == "Delayed 15 min"
+    assert m["live_tip"] is True
+    assert abs(m["change"] - 12.5) < 1e-9
+    # Close-source quote must not rewrite the series.
+    out2, m2 = series.apply_quote(points, meta, {
+        "price": 999.0, "source": "close", "label": "At close",
+    })
+    assert out2[-1][1] == 110.0
+    assert m2.get("live_tip") is not True
+    print("  OK  finnhub quote tips the chart; close quote leaves it alone")
 
 
 # ------------------------------------------------------------- API contract
@@ -193,25 +237,6 @@ def test_missing_prices_degrades_gracefully():
     print("  OK  missing price history shows an explanation, not an empty frame")
 
 
-if __name__ == "__main__":
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    failed = 0
-    for t in tests:
-        print(f"{t.__name__}:")
-        try:
-            t()
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {e}")
-        except Exception as e:                              # noqa: BLE001
-            failed += 1
-            import traceback
-            print(f"  ERROR {type(e).__name__}: {e}")
-            traceback.print_exc()
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
-    sys.exit(1 if failed else 0)
-
-
 # ------------------------------------------------ company page restructure
 
 def test_metric_boxes_replaced_by_dense_rail():
@@ -258,15 +283,33 @@ def test_quarterly_toggle_returns_a_fragment():
 
 def test_quarterly_growth_compares_year_over_year():
     """Sequential quarterly growth mostly measures seasonality, so the YoY
-    column must look back four quarters, not one."""
+    column must look back four quarters, not one.
+
+    Tables display newest-period-first (index 0 = most recent quarter), but
+    the *oldest* periods are the ones without 4 prior quarters to compare
+    against -- so the None gap sits at the END of these newest-first arrays,
+    not the start.
+    """
     _, conn = setup()
     from screener import analysis
     q = analysis.statement(conn, 100001, "Q", limit=8)
     rev = next(r for r in q["rows"] if r["metric"] == "revenue")
-    assert all(g is None for g in rev["yoy"][:4]), "YoY should need 4 prior quarters"
-    assert any(g is not None for g in rev["yoy"][4:]), "no YoY computed"
-    assert any(g is not None for g in rev["qoq"][1:]), "QoQ not computed"
+    assert all(g is None for g in rev["yoy"][-4:]), "YoY should need 4 prior quarters"
+    assert any(g is not None for g in rev["yoy"][:4]), "no YoY computed"
+    assert any(g is not None for g in rev["qoq"][:-1]), "QoQ not computed"
     print("  OK  quarterly YoY looks back 4 quarters, QoQ looks back 1")
+
+
+def test_statement_shows_newest_period_first():
+    """Financial tables read newest-to-oldest, left to right -- the
+    convention every real statement viewer uses, and the opposite of the
+    chronological order the growth math is computed in internally."""
+    _, conn = setup()
+    from screener import analysis
+    q = analysis.statement(conn, 100001, "Q", limit=8)
+    assert q["periods"] == sorted(q["periods"], reverse=True), (
+        "periods should run newest -> oldest, left to right")
+    print(f"  OK  newest quarter first: {q['periods'][0]} .. {q['periods'][-1]}")
 
 
 def test_growth_refuses_sign_changes():
@@ -277,10 +320,78 @@ def test_growth_refuses_sign_changes():
     print("  OK  growth returns None across sign changes and zero bases")
 
 
+def test_fiscal_quarter_label_respects_fiscal_year_end():
+    """Calendar quarters (Jan-Mar = Q1) are wrong for most real filers.
+
+    Apple's fiscal year ends in September, so its fiscal Q1 covers
+    Oct-Dec -- a period ending in December is Apple's Q1 of the *following*
+    fiscal year, not calendar Q4. Verified against Apple's real, publicly
+    reported quarter names.
+    """
+    from screener import analysis
+    aapl_fye = "0926"
+    assert analysis.fiscal_quarter_label("2024-09-28", aapl_fye) == "Q4 2024"
+    assert analysis.fiscal_quarter_label("2024-12-28", aapl_fye) == "Q1 2025"
+    assert analysis.fiscal_quarter_label("2025-03-29", aapl_fye) == "Q2 2025"
+    assert analysis.fiscal_quarter_label("2025-06-28", aapl_fye) == "Q3 2025"
+
+    wmt_fye = "0131"
+    assert analysis.fiscal_quarter_label("2025-01-31", wmt_fye) == "Q4 2025"
+    assert analysis.fiscal_quarter_label("2025-04-30", wmt_fye) == "Q1 2026"
+
+    # No fiscal_year_end on file -> assume calendar year, don't crash.
+    assert analysis.fiscal_quarter_label("2025-06-30", None) == "Q2 2025"
+    print("  OK  fiscal quarter labels match real Apple/Walmart quarter names")
+
+
 def test_peers_are_same_industry():
+    """Same SIC gets ranked as a peer; a different SIC never does.
+
+    This test was silently never running (see the note by the `if __name__`
+    block) until it was, at which point it failed for real: the 6 shared
+    fixtures are deliberately spread across 6 *different* SIC codes --
+    browse.py's sector tests need that diversity -- so none of them has a
+    natural same-industry peer among the others. Borrow LEGC's SIC for one
+    query to actually exercise the matching logic, then put it back so
+    later tests still see the original 6-way split.
+    """
     _, conn = setup()
     from screener import analysis
-    peers = analysis.peers(conn, 100001)
-    assert peers, "no peers found"
-    assert all(p["ticker"] != "MODT" for p in peers), "company is its own peer"
-    print(f"  OK  peers: {[p['ticker'] for p in peers][:5]}")
+    mine = conn.execute(
+        "SELECT sic_description FROM snapshot WHERE cik=100001").fetchone()[0]
+    original = conn.execute(
+        "SELECT sic_description FROM snapshot WHERE cik=100002").fetchone()[0]
+    conn.execute("UPDATE snapshot SET sic_description=? WHERE cik=100002", (mine,))
+    conn.commit()
+    try:
+        peers = analysis.peers(conn, 100001)
+        assert peers, "no peers found"
+        assert all(p["ticker"] != "MODT" for p in peers), "company is its own peer"
+        assert "LEGC" in [p["ticker"] for p in peers], "borrowed-SIC peer missing"
+        print(f"  OK  peers: {[p['ticker'] for p in peers][:5]}")
+    finally:
+        conn.execute("UPDATE snapshot SET sic_description=? WHERE cik=100002", (original,))
+        conn.commit()
+
+
+if __name__ == "__main__":
+    # Must stay at the end of the file -- globals() only sees functions the
+    # interpreter has already executed past. A runner defined mid-file
+    # silently drops every test below it; this file had 8 tests doing
+    # exactly that (never run, ever) before this got moved.
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for t in tests:
+        print(f"{t.__name__}:")
+        try:
+            t()
+        except AssertionError as e:
+            failed += 1
+            print(f"  FAIL  {e}")
+        except Exception as e:                              # noqa: BLE001
+            failed += 1
+            import traceback
+            print(f"  ERROR {type(e).__name__}: {e}")
+            traceback.print_exc()
+    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(1 if failed else 0)

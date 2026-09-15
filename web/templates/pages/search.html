@@ -14,7 +14,7 @@
 
 {% if q and rows %}
   <p class="sub">{{ rows|length }} result{{ '' if rows|length == 1 else 's' }} for “{{ q }}”</p>
-  <div class="panel table-scroll" style="padding:0;overflow:hidden">
+  <div class="panel table-scroll" style="padding:0">
     <table>
       <thead><tr><th>Ticker</th><th>Company</th><th style="text-align:left">Industry</th>
                  <th>Market cap</th><th>Price</th></tr></thead>

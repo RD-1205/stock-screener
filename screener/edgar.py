@@ -176,6 +176,28 @@ def parse_companyfacts(doc, only_interesting=True):
     return rows
 
 
+def census_companyfacts(doc):
+    """Count every raw tag a company reports, allowlisted or not.
+
+    `parse_companyfacts(only_interesting=True)` throws away anything not in
+    `concepts.py` before it ever reaches `facts` -- so once that filtering
+    has happened, there is no way to answer "which tag did the *missing*
+    companies use instead?" from the DB alone. This runs over the same
+    already-fetched document to keep that answer, cheaply: one row per
+    (company, tag) with a count, not the full fact history.
+    """
+    if not doc:
+        return []
+    cik = int(doc.get("cik", 0))
+    rows = []
+    for taxonomy, concepts in (doc.get("facts") or {}).items():
+        for concept, body in concepts.items():
+            n = sum(len(entries) for entries in (body.get("units") or {}).values())
+            if n:
+                rows.append((cik, taxonomy, concept, n))
+    return rows
+
+
 def company_meta_from_submissions(doc):
     if not doc:
         return None

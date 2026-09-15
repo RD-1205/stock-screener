@@ -24,6 +24,14 @@ PROBLEM 3: YTD vs discrete quarters.
 from datetime import date
 
 from .concepts import METRICS, METRICS_BY_NAME, DURATION, INSTANT, resolve
+from . import splits as splits_mod
+
+# Per-share metrics that restate on a split (see screener/splits.py, P5 in
+# docs/PENDING-CHANGES.md). Only applied to the CURRENT view (`fundamentals`)
+# -- a point-in-time vintage must show exactly what was on file at that
+# as_of date, mixed basis and all, or it stops being point-in-time.
+SPLIT_ADJUSTED_PER_SHARE = {"eps_basic", "eps_diluted"}
+SPLIT_ADJUSTED_SHARE_COUNT = {"shares_diluted", "shares_outstanding"}
 
 # Period classification by duration in days. Filings are not exact -- a
 # "quarter" can be 84 or 98 days depending on 52/53-week fiscal calendars.
@@ -178,10 +186,18 @@ def normalize_company(conn, cik, as_of=None, table="fundamentals"):
             if len(qs) == 3:
                 emit(metric, fy_end, "Q", val - sum(qs), concept, 1, fy_filed)
 
-    rows = [
-        (cik, metric, pend, ptype, val, concept, derived, filed)
-        for (metric, pend, ptype), (val, concept, derived, filed) in out.items()
-    ]
+    # Split adjustment belongs to the current view only -- see module docstring
+    # at SPLIT_ADJUSTED_PER_SHARE above.
+    split_events = splits_mod.load_splits(conn, cik) if table == "fundamentals" else []
+
+    rows = []
+    for (metric, pend, ptype), (val, concept, derived, filed) in out.items():
+        if split_events and val is not None:
+            if metric in SPLIT_ADJUSTED_PER_SHARE:
+                val = val / splits_mod.factor_after(split_events, filed)
+            elif metric in SPLIT_ADJUSTED_SHARE_COUNT:
+                val = val * splits_mod.factor_after(split_events, filed)
+        rows.append((cik, metric, pend, ptype, val, concept, derived, filed))
     if rows:
         # table is chosen by us, never by user input -- guard anyway.
         assert table in ("fundamentals", "fundamentals_pit"), table

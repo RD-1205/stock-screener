@@ -12,6 +12,7 @@ later if users ask.
 """
 
 import re
+import time
 
 # Allowlist. If a name isn't here it cannot reach the database -- this single
 # dict is your entire SQL-injection defense, so keep it exhaustive and typed.
@@ -100,6 +101,108 @@ def compile_query(text):
         params.append(parse_number(num, suffix))
 
     return " ".join(clauses), params
+
+
+def compile_ranges(ranges):
+    """{'roe': {'min': '15'}, 'pe': {'max': '25'}} -> 'roe >= 15 and pe <= 25'
+
+    This is the range-filter UI's compile step (P4 in docs/PENDING-CHANGES.md):
+    it emits DSL *text*, not SQL, so the result is parsed by the same
+    compile_query() a hand-typed query goes through -- suffix handling
+    ('1b', '500m') and the injection allowlist only exist in one place.
+
+    Both min and max blank means the metric isn't filtered at all, not
+    "0 to infinity" -- it's simply left out of the string. Sorted by name so
+    the same selections always compile to the same string (a stable, diffable,
+    shareable URL).
+    """
+    clauses = []
+    for name in sorted(ranges):
+        bounds = ranges[name] or {}
+        lo = str(bounds.get("min") or "").strip()
+        hi = str(bounds.get("max") or "").strip()
+        if lo:
+            clauses.append(f"{name} >= {lo}")
+        if hi:
+            clauses.append(f"{name} <= {hi}")
+    return " and ".join(clauses)
+
+
+# Grouped for the "+ Add metric" menu. A metric can appear in more than one
+# group if it's genuinely relevant to both (market_cap is both a valuation
+# anchor and the literal definition of "size").
+METRIC_LABELS = {
+    "price": "Price", "market_cap": "Market cap", "revenue": "Revenue",
+    "net_income": "Net income", "operating_income": "Operating income",
+    "eps": "EPS", "fcf": "Free cash flow", "ocf": "Operating cash flow",
+    "total_assets": "Total assets", "total_equity": "Total equity",
+    "total_debt": "Total debt", "cash": "Cash",
+    "pe": "P/E", "pb": "P/B", "ps": "P/S", "ev": "EV", "ev_ebit": "EV/EBIT",
+    "roe": "ROE %", "roa": "ROA %", "gross_margin": "Gross margin %",
+    "operating_margin": "Operating margin %", "net_margin": "Net margin %",
+    "debt_to_equity": "Debt/Equity", "current_ratio": "Current ratio",
+    "revenue_growth": "Revenue growth % (3y)", "eps_growth": "EPS growth % (3y)",
+}
+METRIC_GROUPS = [
+    ("Valuation", ["pe", "pb", "ps", "ev", "ev_ebit", "market_cap"]),
+    ("Quality", ["roe", "roa", "gross_margin", "operating_margin", "net_margin",
+                 "debt_to_equity", "current_ratio"]),
+    ("Growth", ["revenue_growth", "eps_growth"]),
+    ("Size", ["market_cap", "revenue", "net_income", "operating_income", "eps",
+              "fcf", "ocf", "total_assets", "total_equity", "total_debt",
+              "cash", "price"]),
+]
+DEFAULT_RANGE_METRICS = ["pe", "roe", "market_cap"]
+
+# How to format a metric's placeholder range in the UI -- money (with B/M/K
+# suffixes), percent, or a plain number. Anything not listed here is 'num'.
+_MONEY_METRICS = {"market_cap", "revenue", "net_income", "operating_income",
+                   "fcf", "ocf", "total_assets", "total_equity",
+                   "total_debt", "cash", "ev"}
+_PCT_METRICS = {"roe", "roa", "gross_margin", "operating_margin", "net_margin",
+                 "revenue_growth", "eps_growth"}
+METRIC_FORMAT = {
+    name: ("money" if name in _MONEY_METRICS else "pct" if name in _PCT_METRICS else "num")
+    for name in COLUMNS
+}
+
+_ranges_cache = {"at": 0.0, "data": {}}
+RANGES_CACHE_TTL = 900  # seconds
+
+
+def metric_ranges(conn):
+    """p5/p95 per allowlisted column, from the live snapshot -- rendered as
+    placeholder text ("P/E - typically 5-45") so a user doesn't type a value
+    that matches nothing. Cached in-process; a nightly snapshot rebuild is
+    the only thing that changes these, so a page view doesn't need to
+    recompute six-plus percentile queries every time.
+    """
+    now = time.monotonic()
+    if _ranges_cache["data"] and now - _ranges_cache["at"] < RANGES_CACHE_TTL:
+        return _ranges_cache["data"]
+
+    out = {}
+    for col in sorted(set(COLUMNS.values())):
+        n = conn.execute(
+            f"SELECT COUNT(*) FROM snapshot WHERE {col} IS NOT NULL"
+        ).fetchone()[0]
+        if n < 5:
+            continue
+        lo_off = max(0, int(n * 0.05))
+        hi_off = min(n - 1, int(n * 0.95))
+        lo = conn.execute(
+            f"SELECT {col} FROM snapshot WHERE {col} IS NOT NULL "
+            f"ORDER BY {col} ASC LIMIT 1 OFFSET ?", (lo_off,)
+        ).fetchone()[0]
+        hi = conn.execute(
+            f"SELECT {col} FROM snapshot WHERE {col} IS NOT NULL "
+            f"ORDER BY {col} ASC LIMIT 1 OFFSET ?", (hi_off,)
+        ).fetchone()[0]
+        out[col] = (lo, hi)
+
+    _ranges_cache["at"] = now
+    _ranges_cache["data"] = out
+    return out
 
 
 DEFAULT_SELECT = (

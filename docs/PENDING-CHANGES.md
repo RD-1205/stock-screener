@@ -8,7 +8,7 @@ without re-litigating the reasoning.
 
 ---
 
-## P1 — Remove alphabetical *sorting* (keep the letter *filter*)
+## P1 — Remove alphabetical *sorting* (keep the letter *filter*) ✅ Done 2026-09-08
 
 **Asked:** "what could someone potentially have sorting companies
 alphabetically, i don't think we need that"
@@ -42,9 +42,16 @@ tiebreaker — but as a hidden secondary `ORDER BY`, never a user-facing option.
 the `Alphabetical` heading — it will still pass after a reorder, but check it.
 No test currently depends on `sort=ticker`, so removing it is clean.
 
+**Shipped:** `screener/browse.py` — dropped `ticker`/`name` from `SORTS`,
+appended `, s.ticker ASC` as a hidden secondary `ORDER BY` on every query.
+The Alphabetical group was already the last item in `stocks_index.html`
+(nothing to move). `docs/SITEMAP.md` now documents `/stocks?letter=X` as
+indexable/in-sitemap, distinct from the `noindex` sort/sector/band/page
+combinations. 13/13 `test_browse.py` still passing.
+
 ---
 
-## P2 — Collapse the browse filters behind a Filters button
+## P2 — Collapse the browse filters behind a Filters button ✅ Done 2026-09-08
 
 **Asked:** "don't have the filters outright visible, hide them under a filter
 button which can be accessed"
@@ -76,6 +83,22 @@ users see a clean page.
 `test_menu_links_are_real_hrefs` must keep passing — the assertion that
 menu entries are plain `<a href>` is exactly what protects the crawl surface
 here, so do **not** relax it.
+
+**Shipped, with one deliberate simplification.** Filters live behind a
+`Filters · N` toggle (`data-filters-toggle` / `~10 lines in app.js`); all
+links stay real `<a href>`s in the DOM at all times (`hidden` only toggles
+CSS visibility), so `test_menu_links_are_real_hrefs` still passes unchanged.
+Active-filter chips render outside the panel, always visible. Simplified
+from the original two-layout spec ("bar on desktop, sheet on mobile") to one
+layout at every width — a full-width horizontal bar above the results,
+reusing the auto-fit grid that used to be mobile-only — since that already
+satisfies "opens as a bar above the table" without a second, modal-style
+implementation for mobile. **Found and fixed a real bug while building
+this:** `[hidden]` was being silently overridden by `.browse-menu { display:
+grid }` — same CSS specificity, later in the cascade wins, so the browser's
+default `[hidden]{display:none}` never applied. Added an explicit
+`.browse-menu[hidden] { display: none }` (and the same fix for the P4
+dropdown menu below, which had the identical bug).
 
 ---
 
@@ -121,7 +144,7 @@ single number rather than a filter boundary.
 
 ---
 
-## P4 — Screener: range filters instead of typed comparisons
+## P4 — Screener: range filters instead of typed comparisons ✅ Done 2026-09-08
 
 **Asked:** "people can sort and look for companies with specific metric
 values… let's make it more user friendly where we give them lower and upper
@@ -181,9 +204,29 @@ The DSL has no `>=` / `<=` distinction problem — both already parse. But
 `compile_ranges` must emit `>=`/`<=` (inclusive), not `>`/`<`, or a filter of
 "P/E max 25" would exclude a company at exactly 25.
 
+**Shipped as designed**, with the compilation split cleanly by language:
+`screener/screen.py` gained `compile_ranges()` (emits inclusive DSL text,
+sorted by metric name for a stable/shareable query string — verified in
+`test_compile_ranges_produces_inclusive_dsl`), `metric_ranges()` (p5/p95
+placeholders from the live snapshot, in-process cached 15 min), and
+`METRIC_LABELS`/`METRIC_GROUPS`/`METRIC_FORMAT`/`DEFAULT_RANGE_METRICS` for
+the UI. `web/static/js/ranges.js` (new, ~140 lines, no framework) mirrors
+`compile_ranges()` in JS purely for live client-side preview as someone
+types — the compiled string is the only thing that ever reaches the server,
+written into the *same* `#q` field a hand-typed query uses, so `/screener`
+and `/results` needed zero route changes and the existing injection tests
+cover it unchanged. `compile_query` itself: untouched. NULL-exclusion (item
+4) was already correct via ordinary SQL ternary logic (`NULL >= 15` is
+neither true nor false, so the row drops out) — added
+`test_range_filter_excludes_null_not_zero` so that can't regress silently.
+Verified end-to-end in a real browser: range grid → compiled query → Advanced
+text view → results, and example chips (which use `or`, something a range
+grid can't express) correctly jump straight to the text view. 25/25
+`test_pipeline.py`, 11/11 `test_web.py`.
+
 ---
 
-## P5 — Per-share metrics break across stock splits *(correctness bug)*
+## P5 — Per-share metrics break across stock splits *(correctness bug)* ✅ Done 2026-09-08
 
 **Found by the first real ingest.** Not a UI preference — the numbers on the
 company page are currently wrong for any company that has split.
@@ -248,9 +291,44 @@ that a split restates the **same period** across filings; an earnings drop
 changes the value **between periods**. Detect on the former only — my first
 detector conflated them and flagged AMAT's 2012 profit crash as a split.
 
+**Shipped, and it caught two real bugs of its own during verification against
+live data** (805 companies, not the original 65-company sample):
+
+1. **Duplicate detections of the same real split.** Different periods enter
+   a filing's comparative window at different times, so the same real split
+   could pass detection more than once at different filed dates (e.g. AAPL's
+   2014 7:1 split showed up at both a 10-Q's filing date and the following
+   10-K's). Left unfixed, a period filed before *both* dates would have the
+   split's factor applied twice (7× → 49×). Fixed by collapsing to one row
+   per distinct factor, keeping the earliest sighting.
+2. **A false positive from an ordinary restatement.** A real Amazon Q2 2011
+   EPS correction (unrelated to any split) landed within 3% of 40× on both
+   the basic and diluted tags for that one quarter — exactly what the
+   clean-ratio heuristic was built to catch. Fixed by requiring the same
+   factor to be corroborated by **at least two distinct periods** in the
+   same filing before trusting it; a real split restates every comparative
+   period a filing carries at once, an ordinary correction touches one.
+
+Both fixes are regression-tested (`tests/test_splits.py`,
+`test_single_period_restatement_is_not_enough_to_call_it_a_split`). After
+the fix, detection against the real DB recovers exactly the known public
+split history with no noise: AAPL (7:1 2014, 4:1 2020), AMZN (20:1 2022),
+NVDA (4:1 2021, 10:1 2024), TSLA (5:1 2020, 3:1 2022). AAPL's real diluted
+EPS series is now monotonically smooth 2007→2025 with no split
+discontinuity anywhere (verified against the live `fundamentals` table, not
+just the fixture). New `splits` table + `screener/splits.py` + `python -m
+screener.cli splits` backfill command (805 companies scanned, 108 real
+split events on file). 7/7 `test_splits.py`, 108/108 full suite.
+
+**Bonus, found while running the full suite read-only per an earlier ask:**
+`tests/test_tape.py` had the same `FINNHUB_API_KEY` test-isolation gap
+already fixed in `test_chart.py` (popping the key only *before* importing
+`web.app`, not after — `_load_dotenv()`'s `setdefault` re-injects a real
+local key on import even when popped beforehand). Applied the identical fix.
+
 ---
 
-## P6 — Ingest discards the evidence needed to improve the tag map
+## P6 — Ingest discards the evidence needed to improve the tag map ✅ Done 2026-09-08
 
 **Also found by the real ingest, and it undermines `/coverage`.**
 
@@ -279,6 +357,76 @@ produce the queue.
 `cost_of_revenue` 77% (banks and insurers have none). Verify with the census
 before touching `concepts.py`.
 
+**Shipped as designed**, plus one refinement the doc didn't anticipate.
+`edgar.census_companyfacts()` counts every raw tag in a company's
+companyfacts document (allowlisted or not) from the *same* fetch ingest
+already makes — no extra network calls for new ingests. New `fact_concepts`
+table, wired into `ingest_company`/`ingest_bulk_zip`/`ingest_dir`, plus
+`python -m screener.cli census` to backfill it for the 805 companies ingested
+before this existed (re-fetches per company — the only way, since
+`parse_companyfacts` never kept the non-allowlisted tags for us to build it
+from after the fact). `/coverage` now has a "Missing companies carry" column.
+
+**The refinement:** the naive version of the "which tag do missing companies
+carry" query is dominated by boilerplate every 10-K reports regardless
+(`Assets`, `NetIncomeLoss`, the three cash-flow classifications) — those came
+back as the "top candidate" for *every* thin metric, which isn't a signal,
+it's just what any two subsets of real filers have in common. Fixed by
+excluding any tag reported by more than half the whole ingested universe.
+After the fix, the page mostly confirms this doc's own prediction — the
+worst-covered metrics (`short_term_investments` 38%, `gross_profit` 54%,
+`inventory` 60%, `cost_of_revenue` 67%) don't show a clean single
+replacement tag, because the absence is genuinely structural (financial-
+statement shape varies by industry), not a missed mapping. That's the
+honest answer the page exists to give, not a feature gap. 22/22
+`test_pipeline.py` census assertions passing.
+
 ---
 
 <!-- Append new items below this line. -->
+
+## P7 — Daily EODHD price automation was silently failing
+
+**Found**, not asked for, while answering "did we pull today's 20 companies"
+from a prior session. The Windows Task Scheduler task set up earlier
+(`us-screener-daily-price-ingest`) had run on schedule every night
+(`NumberOfMissedRuns: 0`) but was terminating mid-run (`LastTaskResult
+3221225786`, `STATUS_CONTROL_C_EXIT`) on most nights — likely the machine
+sleeping or the session logging off while it ran under the default
+InteractiveToken logon, which requires an active session for the whole run.
+Net effect: only 20 of 290 waiting tickers got priced across 8 days, not the
+~160 daily automation should have produced.
+
+**Fixed:** re-registered the task with `-WakeToRun` (wakes a sleeping
+machine), `-RestartCount 3 -RestartInterval 5min` (survives a transient
+failure), and a 15-minute execution time limit (bounds a hang). True
+"survives a full log-off" resilience needs either admin rights (S4U logon —
+attempted, `Register-ScheduledTask` returned Access Denied without
+elevation) or storing the Windows account password (which is out of scope
+per the credential-handling rule) — flagging this as a known remaining gap,
+not silently claiming full reliability.
+
+**Also fixed:** `scripts/daily_price_ingest.ps1`'s log was unreadable —
+PowerShell's `*>>` redirection operator writes UTF-16LE, mismatched against
+the UTF-8 header lines, rendering as spaced-out garbage on read-back.
+Switched to capturing output as objects and writing with explicit
+`-Encoding utf8`, and added exit-code logging for both steps so a future
+failure is diagnosable from the log alone instead of requiring Task
+Scheduler's own history.
+
+---
+
+## P8 — Real-ingest growth, 2026-09-08 session
+
+Not a PENDING-CHANGES item on its own, logged here for the record since it's
+the data underneath everything else above:
+
+- **Fundamentals:** +500 companies via `python -m screener.cli ingest
+  --limit 500` (349 → 805 companies with real SEC facts, ~2M new fact rows).
+- **Splits:** `python -m screener.cli splits` backfilled all 805 — 108 real
+  split events recovered, zero false positives after the P5 fixes above.
+- **Census:** `python -m screener.cli census` backfilled all 805 for the new
+  P6 work queue.
+- `normalize` + `snapshot` re-run on the full 805-company set with the split
+  fix applied, so the live site reflects corrected EPS immediately, not just
+  the next scheduled rebuild.

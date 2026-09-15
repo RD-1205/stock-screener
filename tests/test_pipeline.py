@@ -294,6 +294,36 @@ def test_suffix_parsing():
     print("  OK  suffix parsing (2.5b -> 2,500,000,000)")
 
 
+def test_compile_ranges_produces_inclusive_dsl():
+    """P4: the range grid compiles to DSL text (the existing parser's job),
+    not straight to SQL -- and bounds must be inclusive (>=/<=), or a P/E
+    max of 25 would wrongly exclude a company sitting at exactly 25."""
+    q = screen.compile_ranges({"pe": {"max": "25"}, "roe": {"min": "15"}})
+    assert q == "pe <= 25 and roe >= 15", q
+    where, params = screen.compile_query(q)
+    assert params == [25.0, 15.0]
+    print(f"  OK  compile_ranges -> {q!r}, inclusive bounds parse cleanly")
+
+
+def test_compile_ranges_blank_bounds_are_not_filtered():
+    q = screen.compile_ranges({"pe": {"min": "", "max": ""}, "roe": {"min": "15"}})
+    assert q == "roe >= 15", q
+    print("  OK  a metric with both bounds blank is left out entirely, not 0..inf")
+
+
+def test_range_filter_excludes_null_not_zero():
+    """A company with no gross margin tagged must not silently read as 0 and
+    match a wide 'gross_margin <= X' range -- NULL must stay excluded."""
+    conn, _ = build_db()
+    q = screen.compile_ranges({"gross_margin": {"max": "1000"}})
+    rows = screen.run(conn, q, order_by="market_cap", limit=50)
+    tickers = [r["ticker"] for r in rows]
+    assert "BANQ" not in tickers, (
+        "a NULL gross_margin matched 'gross_margin <= 1000' -- NULL is being "
+        "treated as a number instead of excluded")
+    print(f"  OK  NULL gross_margin correctly excluded from a wide range filter: {tickers}")
+
+
 def test_fetch_tickers_keeps_primary_ticker_per_cik():
     """SEC lists a CIK's common stock first, then any other securities
     registered under it -- preferred share series, ETFs, stale when-issued
@@ -314,6 +344,43 @@ def test_fetch_tickers_keeps_primary_ticker_per_cik():
     by_cik = {r["cik"]: r["ticker"] for r in rows}
     assert by_cik == {19617: "JPM", 320193: "AAPL"}, by_cik
     print("  OK  multi-security CIK resolves to its primary ticker, not the last one seen")
+
+
+def test_census_captures_every_raw_tag():
+    """The whole point of P6: parse_companyfacts only keeps allowlisted
+    concepts, so /coverage can't say which tag a missing company used --
+    unless this ran over the same document first."""
+    doc = {
+        "cik": 999,
+        "facts": {
+            "us-gaap": {
+                "Revenues": {"units": {"USD": [
+                    {"val": 100, "start": "2023-01-01", "end": "2023-12-31"},
+                ]}},
+                "SomeObscureTagNotInConceptsPy": {"units": {"USD": [
+                    {"val": 5}, {"val": 6},
+                ]}},
+            },
+        },
+    }
+    rows = edgar.census_companyfacts(doc)
+    by_concept = {(t, c): n for _cik, t, c, n in rows}
+    assert by_concept[("us-gaap", "Revenues")] == 1
+    assert by_concept[("us-gaap", "SomeObscureTagNotInConceptsPy")] == 2, (
+        "a tag with no concepts.py mapping must still be counted -- that's the point")
+    print(f"  OK  census counted {len(rows)} tags, including one concepts.py never claims")
+
+
+def test_ingest_populates_the_census_table():
+    """ingest_dir (and ingest_company/ingest_bulk_zip) must build the raw-tag
+    census as a side effect of ingest, from the same document already
+    fetched -- no separate pass or extra network call needed."""
+    conn, _ = build_db()
+    n = conn.execute("SELECT COUNT(DISTINCT cik) FROM fact_concepts").fetchone()[0]
+    assert n == 6, f"expected all 6 fixture companies to have a tag census, got {n}"
+    rows = conn.execute("SELECT COUNT(*) FROM fact_concepts").fetchone()[0]
+    assert rows >= n, f"expected at least one tag row per company, got {rows} rows for {n} companies"
+    print(f"  OK  census populated for {n} companies, {rows} (company, tag) rows total")
 
 
 def test_price_csv_drops_truncation_message_row():

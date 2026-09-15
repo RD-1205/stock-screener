@@ -51,6 +51,44 @@ CREATE INDEX IF NOT EXISTS idx_facts_cik     ON facts(cik, concept);
 
 
 -- ---------------------------------------------------------------
+-- 2b. Recovered stock splits (see docs/PENDING-CHANGES.md P5).
+--
+-- The same period restates across filings by exactly the split ratio, so
+-- these are recovered from `facts` itself (screener/splits.py), never
+-- entered by hand or pulled from an external corporate-actions feed.
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS splits (
+    cik              INTEGER NOT NULL,
+    effective_filed  TEXT    NOT NULL,   -- filing date the restated value first appeared
+    factor           REAL    NOT NULL,   -- share multiplier: >1 forward split, <1 reverse
+    PRIMARY KEY (cik, effective_filed)
+);
+CREATE INDEX IF NOT EXISTS idx_splits_cik ON splits(cik);
+
+
+-- ---------------------------------------------------------------
+-- 2c. Raw tag census -- every concept a company reports, not just the
+-- ones concepts.py already claims (see docs/PENDING-CHANGES.md P6).
+--
+-- `facts` only ever holds allowlisted concepts (parse_companyfacts filters
+-- before storing, on purpose -- storing every value for every one of the
+-- ~14,000 us-gaap tags across the whole market would be enormous for no
+-- benefit). But that means /coverage can say a metric is thin without ever
+-- being able to say which tag the missing companies used instead. This
+-- table is the cheap middle ground: one row per (company, tag) with just a
+-- count, built from the same companyfacts document ingest already fetches.
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fact_concepts (
+    cik       INTEGER NOT NULL,
+    taxonomy  TEXT    NOT NULL,
+    concept   TEXT    NOT NULL,
+    n_facts   INTEGER NOT NULL,
+    PRIMARY KEY (cik, taxonomy, concept)
+);
+CREATE INDEX IF NOT EXISTS idx_fact_concepts_concept ON fact_concepts(concept);
+
+
+-- ---------------------------------------------------------------
 -- 3. Normalized fundamentals.
 --
 -- This is the layer that makes a screener a screener. `facts` is
@@ -256,3 +294,27 @@ CREATE TABLE IF NOT EXISTS index_members (
     PRIMARY KEY (index_slug, ticker)
 );
 CREATE INDEX IF NOT EXISTS idx_index_ticker ON index_members(ticker);
+
+
+-- ---------------------------------------------------------------
+-- 8. Market sentiment gauge.
+--
+-- CNN's Fear & Greed Index weights 7 indicators equally, each as a
+-- standard-deviation move from its own recent norm (see
+-- docs/DESIGN-SPEC.md 7.3). v1 computes the 3 that come straight from our
+-- own price DB -- momentum, price strength, breadth -- honestly labelled as
+-- partial rather than faking the other 4 (volatility, junk bond demand,
+-- safe haven demand, put/call), which need FRED/CBOE feeds not wired up yet.
+-- One row per trading day so a real history (and eventually proper z-scores
+-- against it, once enough days exist) accumulates starting from day one.
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sentiment (
+    date            TEXT PRIMARY KEY,   -- YYYY-MM-DD, the trading day this reflects
+    momentum        REAL,               -- 0-100: universe price vs its own moving average
+    strength        REAL,               -- 0-100: net share near highs vs near lows
+    breadth         REAL,               -- 0-100: advancing vs declining volume
+    composite       REAL,               -- equal-weighted average of the components above
+    components_json TEXT,               -- raw inputs behind each score, for the breakdown UI
+    universe_size   INTEGER,            -- how many priced tickers fed this reading
+    computed_at     TEXT
+);

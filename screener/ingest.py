@@ -5,13 +5,26 @@ import os
 import zipfile
 from datetime import datetime
 
-from . import edgar
+from . import edgar, splits
 
 FACT_INSERT = (
     "INSERT OR REPLACE INTO facts "
     "(cik,taxonomy,concept,unit,period_start,period_end,fy,fp,form,filed,accn,frame,val) "
     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
+
+CENSUS_INSERT = (
+    "INSERT OR REPLACE INTO fact_concepts (cik,taxonomy,concept,n_facts) VALUES (?,?,?,?)"
+)
+
+
+def _store_census(conn, doc):
+    """Record every tag a company reports, not just the allowlisted ones --
+    see edgar.census_companyfacts and P6 in docs/PENDING-CHANGES.md."""
+    rows = edgar.census_companyfacts(doc)
+    if rows:
+        conn.executemany(CENSUS_INSERT, rows)
+    return rows
 
 
 def upsert_companies(conn, rows):
@@ -55,9 +68,11 @@ def ingest_company(conn, cik, user_agent, with_meta=True):
                 )
 
         doc = edgar.fetch_companyfacts(cik, user_agent)
+        _store_census(conn, doc)
         rows = edgar.parse_companyfacts(doc)
         if rows:
             conn.executemany(FACT_INSERT, rows)
+            splits.refresh_splits(conn, cik)
         _log(conn, cik, "ok" if rows else "empty", len(rows))
         conn.commit()
         return len(rows)
@@ -84,9 +99,11 @@ def ingest_bulk_zip(conn, zip_path, limit=None, progress=None):
             try:
                 with zf.open(name) as fh:
                     doc = json.load(fh)
+                _store_census(conn, doc)
                 rows = edgar.parse_companyfacts(doc)
                 if rows:
                     conn.executemany(FACT_INSERT, rows)
+                    splits.refresh_splits(conn, int(doc.get("cik", 0)))
                     total += len(rows)
                 _log(conn, int(doc.get("cik", 0)), "ok" if rows else "empty", len(rows))
             except Exception as e:              # noqa: BLE001
@@ -109,11 +126,13 @@ def ingest_dir(conn, path, limit=None):
     for fname in files:
         with open(os.path.join(path, fname), "r", encoding="utf-8") as fh:
             doc = json.load(fh)
+        cik = int(doc.get("cik", 0))
+        _store_census(conn, doc)
         rows = edgar.parse_companyfacts(doc)
         if rows:
             conn.executemany(FACT_INSERT, rows)
+            splits.refresh_splits(conn, cik)
             total += len(rows)
-        cik = int(doc.get("cik", 0))
         conn.execute(
             "INSERT INTO companies (cik,name,updated_at) VALUES (?,?,?) "
             "ON CONFLICT(cik) DO UPDATE SET name=excluded.name",

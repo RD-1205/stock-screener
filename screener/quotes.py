@@ -47,20 +47,26 @@ def label():
 
 
 def _finnhub_quote(symbol, key, timeout=8):
+    from datetime import datetime, timezone
+
     url = FINNHUB_URL.format(sym=urllib.parse.quote(symbol.upper()), key=key)
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         d = json.loads(r.read())
-    # Finnhub: c=current, d=change, dp=change %, pc=previous close.
+    # Finnhub: c=current, d=change, dp=change %, pc=previous close, t=unix ts.
     # An unknown symbol returns zeros rather than a 404, so treat 0 as absent.
     if not d or not d.get("c"):
         return None
+    as_of = None
+    if d.get("t"):
+        as_of = datetime.fromtimestamp(int(d["t"]), tz=timezone.utc).date().isoformat()
     return {
         "price": float(d["c"]),
         "change": float(d.get("d") or 0.0),
         "change_pct": float(d.get("dp") or 0.0),
         "source": "finnhub",
         "label": LABELS["finnhub"],
+        "as_of": as_of,
     }
 
 

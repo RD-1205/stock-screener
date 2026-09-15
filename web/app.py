@@ -13,6 +13,8 @@ Run:  python -m screener.cli serve
 Docs: http://127.0.0.1:8000/api/docs
 """
 
+import html
+import math
 import os
 import sys
 import time
@@ -27,12 +29,41 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import (analysis, browse, db, quotes, screen, series,  # noqa: E402
-                      transform)
+from screener import (analysis, browse, db, news, quotes, screen, sentiment,  # noqa: E402
+                      series, transform)
 from screener.concepts import METRICS                        # noqa: E402
 from web.content import legal                                # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+
+def _load_dotenv(path=None):
+    """Minimal .env loader — no python-dotenv dependency.
+
+    Only sets keys that aren't already in the environment, so a real shell
+    export always wins. .env is gitignored; used for local Finnhub etc.
+    """
+    path = path or os.path.join(ROOT, ".env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key:
+                    os.environ.setdefault(key, val)
+    except OSError:
+        return
+
+
+_load_dotenv()
+
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
 SITE_NAME = os.environ.get("SITE_NAME", "us-screener")
@@ -44,12 +75,29 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
-app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """Force a conditional GET on every static-asset request.
+
+    Plain StaticFiles sends Last-Modified/ETag but no Cache-Control, which
+    leaves the browser to guess a freshness window (RFC 7234's "heuristic
+    caching" -- roughly 10% of the file's age). That guess can span minutes
+    to hours, so a JS/CSS edit can silently keep serving the pre-edit file
+    to an already-open tab with no error, no cache-bust needed to explain
+    it. `no-cache` still lets the browser cache the body, it just always
+    revalidates first -- a cheap 304 when unchanged, so this costs a round
+    trip, not a re-download.
+    """
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=os.path.join(HERE, "static")), name="static")
 
 NAV = [
     ("/screener", "Screener"),
     ("/stocks", "Stocks"),
-    ("/screens", "Screens"),
     ("/lists", "Lists"),
     ("/coverage", "Coverage"),
 ]
@@ -174,6 +222,25 @@ def render_cell(value, kind):
 
 
 templates.env.globals["render_cell"] = render_cell
+templates.env.globals["zone_description"] = sentiment.zone_description
+
+
+def static_version(rel_path):
+    """File mtime as a cache-busting query param for a static asset.
+
+    Paired with RevalidatingStaticFiles above: that makes a *server* restart
+    always serve fresh bytes; this makes an *already-open tab* pick them up
+    too, by changing the URL (and therefore the browser's cache key)
+    whenever the file's contents actually change, rather than relying on
+    every page load paying a revalidation round trip.
+    """
+    try:
+        return str(int(os.path.getmtime(os.path.join(HERE, "static", rel_path))))
+    except OSError:
+        return "0"
+
+
+templates.env.globals["static_version"] = static_version
 
 
 # ---- template globals -----------------------------------------------------
@@ -265,9 +332,7 @@ def run_screen(conn, q, as_of, order, direction, limit):
 def home(request: Request):
     """Landing page.
 
-    Currently the shell plus what we can honestly show from real data. The
-    filing news feed (R1) and market pulse band (R5/R6) land in build step 6 --
-    stubbing them with fake data now would just hide how much is left.
+    Currently the shell plus what we can honestly show from real data.
     """
     conn = get_conn()
     try:
@@ -275,9 +340,21 @@ def home(request: Request):
         total = conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0]
     except Exception:                                   # noqa: BLE001
         largest, total = [], 0
+    mood = mood_svg = None
+    try:
+        mood = sentiment.latest(conn)
+        if mood:
+            mood_svg = mood_gauge_svg(mood["composite"])
+    except Exception:                                   # noqa: BLE001
+        mood = mood_svg = None            # never break the landing page over this
+    try:
+        headlines = news.general(limit=10)
+    except Exception:                                   # noqa: BLE001
+        headlines = []                    # never break the landing page over this
 
     return templates.TemplateResponse(request, "pages/home.html", {
-        "largest": largest, "total": total, "examples": EXAMPLES,
+        "largest": largest, "total": total, "mood": mood,
+        "mood_svg": mood_svg, "headlines": headlines,
     })
 
 
@@ -300,12 +377,22 @@ def screener(request: Request,
         "q": q, "as_of": as_of, "order": order,
         "dir": dir, "limit": limit, "rows": rows, "error": error,
         "cols": TABLE_COLS, "examples": EXAMPLES, "vintages": vintages,
+        "screens": _screen_cards(conn),
         "fields": sorted(set(screen.COLUMNS)),
         "count": conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0],
         # /screener?q=... has unbounded parameter combinations, so only the
         # bare page is indexable. Curated screens live at /screens/{slug}.
         "noindex": bool(q or as_of),
         "header_note": None,
+        # Range-filter grid (P4): metric_columns maps a DSL alias ("revenue")
+        # to its real snapshot column ("revenue_ttm") so the template can
+        # look up placeholder ranges, which are keyed by column name.
+        "metric_columns": screen.COLUMNS,
+        "metric_labels": screen.METRIC_LABELS,
+        "metric_groups": screen.METRIC_GROUPS,
+        "metric_format": screen.METRIC_FORMAT,
+        "default_range_metrics": screen.DEFAULT_RANGE_METRICS,
+        "metric_ranges": screen.metric_ranges(conn),
     })
 
 
@@ -396,14 +483,13 @@ def stocks_index(request: Request, sector: str = "", band: str = "",
     })
 
 
-@app.get("/screens", response_class=HTMLResponse)
-def screens_index(request: Request):
-    """Curated screens.
-
-    Two jobs: onboarding for people who don't know what to type, and indexable
-    landing pages. Live match counts make them feel alive rather than static.
+def _screen_cards(conn):
+    """Curated screens with live match counts -- shared by the screener
+    page's "ready-made" section and the standalone /screens gallery. Two
+    jobs: onboarding for people who don't know what to type, and (via
+    /screens/{slug}) indexable landing pages. Live counts make them feel
+    alive rather than static.
     """
-    conn = get_conn()
     cards = []
     for slug, (label, query) in SCREENS.items():
         try:
@@ -411,8 +497,17 @@ def screens_index(request: Request):
         except Exception:                               # noqa: BLE001
             count = None
         cards.append({"label": label, "query": query, "count": count, "slug": slug})
+    return cards
+
+
+@app.get("/screens", response_class=HTMLResponse)
+def screens_index(request: Request):
+    """Curated screens gallery. Not in the primary nav (folded into
+    /screener directly -- see the "Ready-made screens" section there) but
+    still a real page: linked from the footer and home, and each
+    /screens/{slug} stays the canonical indexable URL for that screen."""
     return templates.TemplateResponse(request, "pages/screens_index.html",
-                                      {"cards": cards})
+                                      {"cards": _screen_cards(get_conn())})
 
 
 @app.get("/screens/{slug}", response_class=HTMLResponse)
@@ -478,6 +573,11 @@ def company(request: Request, ticker: str):
     if not row:
         raise HTTPException(404, f"{ticker.upper()} not found")
 
+    fye = conn.execute(
+        "SELECT fiscal_year_end FROM companies WHERE cik=?", (row["cik"],)
+    ).fetchone()
+    fiscal_year_end = fye["fiscal_year_end"] if fye else None
+
     history = annual_history(conn, row["cik"])
     tick = row["ticker"]
 
@@ -492,7 +592,8 @@ def company(request: Request, ticker: str):
         "c": row, "history": history,
         "quote": quote,
         "has_prices": has_prices,
-        "statement": analysis.statement(conn, row["cik"], "FY"),
+        "statement": analysis.statement(conn, row["cik"], "FY",
+                                        fiscal_year_end=fiscal_year_end),
         "ratios": analysis.ratios(conn, row["cik"]),
         "balance": analysis.balance_sheet(conn, row["cik"]),
         "peers": analysis.peers(conn, row["cik"]),
@@ -508,13 +609,17 @@ def company(request: Request, ticker: str):
 @app.get("/stocks/{ticker}/statement", response_class=HTMLResponse)
 def company_statement(request: Request, ticker: str, period: str = "FY"):
     """HTMX partial: the annual/quarterly toggle swaps just the table."""
-    row = get_conn().execute(
-        "SELECT cik FROM snapshot WHERE ticker=?", (ticker.upper(),)).fetchone()
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT c.cik, co.fiscal_year_end FROM snapshot c "
+        "JOIN companies co ON co.cik = c.cik WHERE c.ticker=?",
+        (ticker.upper(),)).fetchone()
     if not row:
         raise HTTPException(404, f"{ticker.upper()} not found")
     period = "Q" if period.upper() == "Q" else "FY"
-    data = analysis.statement(get_conn(), row["cik"], period,
-                              limit=12 if period == "Q" else 10)
+    data = analysis.statement(conn, row["cik"], period,
+                              limit=12 if period == "Q" else 10,
+                              fiscal_year_end=row["fiscal_year_end"])
     return templates.TemplateResponse(request, "_partials/_statement.html",
                                       {"statement": data})
 
@@ -539,11 +644,46 @@ def coverage(request: Request):
             "SELECT source_concept, COUNT(DISTINCT cik) n FROM fundamentals "
             "WHERE metric=? GROUP BY source_concept ORDER BY n DESC LIMIT 4",
             (m.name,)).fetchall()
+
+        # The actual work queue: among companies that HAVE fundamentals but
+        # NOT this metric, which raw tags (not already on our candidate
+        # list) do they carry? A tag with a high company count here is a
+        # real gap in concepts.py, not noise -- see P6 in
+        # docs/PENDING-CHANGES.md.
+        #
+        # The naive version of this query is dominated by boilerplate every
+        # 10-K carries regardless (Assets, NetIncomeLoss, the three cash-flow
+        # classifications) -- those show up as the "top candidate" for
+        # EVERY thin metric, which is not a signal. Exclude anything
+        # reported by more than half the whole ingested universe; a tag
+        # that's genuinely an alternate spelling of a specific line item is
+        # used by the subset of filers who report that item, not by nearly
+        # everyone.
+        tried = m.concepts
+        boilerplate_threshold = total // 2
+        missing_tags = conn.execute(
+            f"""SELECT fc.concept, COUNT(DISTINCT fc.cik) n
+                FROM fact_concepts fc
+                WHERE fc.cik IN (SELECT DISTINCT cik FROM facts)
+                  AND fc.cik NOT IN (
+                      SELECT cik FROM fundamentals WHERE metric=?
+                  )
+                  AND fc.concept NOT IN ({','.join('?' * len(tried))})
+                  AND fc.taxonomy = 'us-gaap'
+                  AND fc.concept NOT IN (
+                      SELECT concept FROM fact_concepts
+                      GROUP BY concept HAVING COUNT(DISTINCT cik) > ?
+                  )
+                GROUP BY fc.concept
+                ORDER BY n DESC LIMIT 6""",
+            [m.name, *tried, boilerplate_threshold]).fetchall() if got < total else []
+
         rows.append({
             "metric": m.name, "kind": m.kind, "got": got, "total": total,
             "pct": 100.0 * got / total,
             "tags": [(t["source_concept"], t["n"]) for t in tags],
             "candidates": len(m.concepts),
+            "missing_tags": [(t["concept"], t["n"]) for t in missing_tags],
         })
     rows.sort(key=lambda r: r["pct"])
     return templates.TemplateResponse(request, "coverage.html", {
@@ -701,10 +841,16 @@ def api_chart(ticker: str, range: str = series.DEFAULT_RANGE):
     Points are arrays, not objects: [["2024-01-02", 185.64], ...] is about 40%
     smaller than the object form over a few thousand rows, and costs one map()
     on the client. At 10 years of history that's a real saving.
+
+    When Finnhub is configured, the last point is tipped to the delayed quote
+    so the chart end matches the company header.
     """
-    points, meta = series.fetch(get_conn(), ticker, range)
+    conn = get_conn()
+    points, meta = series.fetch(conn, ticker, range)
     if not points:
         raise HTTPException(404, f"No price history for {ticker.upper()}")
+    quote = quotes.get(conn, [ticker.upper()]).get(ticker.upper())
+    points, meta = series.apply_quote(points, meta, quote)
     return {"points": points, **meta}
 
 
@@ -784,6 +930,63 @@ def bar_chart(pairs, width=560, height=140):
         )
     return (f'<svg viewBox="0 0 {width} {height}" class="chart" '
             f'preserveAspectRatio="none">{"".join(bars)}</svg>')
+
+
+# score 0-100 -> zone slug, matching screener.sentiment.ZONES exactly so the
+# arc segments and the text label always agree with each other.
+_MOOD_ZONE_SLUGS = [z[2] for z in sentiment.ZONES]
+
+
+def _polar(cx, cy, r, score):
+    """A point on the gauge arc for a 0-100 score.
+
+    Score 0 sits at the left end of the semicircle (180 deg, math
+    convention), 100 at the right end (0 deg), 50 straight up (90 deg) --
+    left-to-right reads fear-to-greed the way the linear bar already did.
+    SVG y grows downward, so the y term is subtracted rather than added.
+    """
+    angle = math.radians(180 - (score / 100.0) * 180)
+    return cx + r * math.cos(angle), cy - r * math.sin(angle)
+
+
+def mood_gauge_svg(composite, width=300, height=180):
+    """Server-rendered semicircle dial: 5 coloured zone bands, a needle at
+    the current score. No chart library -- same approach as bar_chart()
+    above. Each band carries its label/description as data attributes
+    (`web/static/js/app.js` reads them) so hovering or tapping a colour
+    explains what it means, and a plain `<title>` covers browsers/inputs
+    that skip the JS tooltip entirely."""
+    cx, cy = width / 2, height - 20
+    r_out, r_in = height - 40, height - 75
+
+    bands = []
+    for i, (_lo, _hi, slug, label, desc) in enumerate(sentiment.ZONES):
+        lo, hi = i * 20, (i + 1) * 20
+        x1o, y1o = _polar(cx, cy, r_out, lo)
+        x2o, y2o = _polar(cx, cy, r_out, hi)
+        x1i, y1i = _polar(cx, cy, r_in, lo)
+        x2i, y2i = _polar(cx, cy, r_in, hi)
+        label_esc, desc_esc = html.escape(label), html.escape(desc)
+        bands.append(
+            f'<path class="mood-arc mood-arc-{slug}" tabindex="0" '
+            f'data-zone-label="{label_esc}" data-zone-desc="{desc_esc}" d="'
+            f'M {x1o:.1f} {y1o:.1f} '
+            f'A {r_out:.1f} {r_out:.1f} 0 0 1 {x2o:.1f} {y2o:.1f} '
+            f'L {x2i:.1f} {y2i:.1f} '
+            f'A {r_in:.1f} {r_in:.1f} 0 0 0 {x1i:.1f} {y1i:.1f} Z">'
+            f'<title>{label_esc}: {desc_esc}</title></path>'
+        )
+
+    score = max(0.0, min(100.0, composite))
+    nx, ny = _polar(cx, cy, r_out + 8, score)
+    needle = (
+        f'<line x1="{cx}" y1="{cy}" x2="{nx:.1f}" y2="{ny:.1f}" class="mood-needle"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="6" class="mood-needle-hub"/>'
+    )
+
+    return (f'<svg viewBox="0 0 {width} {height}" class="mood-dial" '
+            f'role="img" aria-label="Market mood: {score:.0f} out of 100">'
+            f'{"".join(bands)}{needle}</svg>')
 
 
 # ---------------------------------------------------------------- catch-all
