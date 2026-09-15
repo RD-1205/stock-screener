@@ -74,6 +74,47 @@
     return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
   }
 
+  // MAX can span many years once real price history goes back further than
+  // today's ~1-year provider cap, and at that zoom the library's default
+  // formatter mixes month/day ticks in with year ticks -- fine up close, but
+  // "the big picture" is exactly what should read as a clean year-by-year
+  // timeline. Force every tick to a bare year only for this range.
+  function yearOnlyTickFormatter(time) {
+    return String(new Date(time * 1000).getUTCFullYear());
+  }
+
+  function defaultTickFormatter(time, tickMarkType) {
+    var d = new Date(time * 1000);
+    var TT = LightweightCharts.TickMarkType;
+    if (tickMarkType === TT.Year) return String(d.getUTCFullYear());
+    if (tickMarkType === TT.Month) {
+      return d.toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+    }
+    if (tickMarkType === TT.DayOfMonth) {
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+    }
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  }
+
+  // The actual bug, finally correctly diagnosed: fitContent() guarantees
+  // every bar is *visible*, not that the bars *fill the panel*. With a
+  // sparse series (13 monthly points on MAX, ~50 on 1y) in a wide box, the
+  // library shows everything at a modest default bar spacing and leaves
+  // the rest of the width empty -- rather than stretching bars to fill it.
+  // That's independent of container size or resize timing, which is why
+  // two rounds of "fix the resize race" didn't move it: the race wasn't
+  // the bug. setVisibleLogicalRange maps a given bar-index range directly
+  // and linearly across the *entire* current pixel width, which is what
+  // "fill the box" actually requires. [-0.5, n-0.5] is the standard trick
+  // for "show exactly these n bars, edge to edge, no matter how few there
+  // are" -- half a bar of padding on each side keeps the first/last point
+  // from sitting flush against the axis lines.
+  function stretchToFill(chart, pointCount) {
+    if (pointCount > 0) {
+      chart.timeScale().setVisibleLogicalRange({ from: -0.5, to: pointCount - 0.5 });
+    }
+  }
+
   function init(root) {
     var ticker = root.dataset.chart;
     var priceEl = root.querySelector("[data-legend-price]");
@@ -85,6 +126,7 @@
     var chart, line, controller;
     var firstValue = null;     // period-start price, so any hovered point can
                                 // show "vs start of range" like the idle summary does
+    var pointCount = 0;        // needed on every resize too, not just on load
 
     function setStatus(msg) {
       if (status) { status.textContent = msg || ""; status.hidden = !msg; }
@@ -101,9 +143,40 @@
       if (dateEl) dateEl.textContent = dateLabel || "";
     }
 
-    function build() {
+    // Creating the chart with a guessed initial width (canvas.clientWidth
+    // read synchronously, right as this element is scrolling into view via
+    // IntersectionObserver) and correcting it afterward via chart.resize()
+    // was the actual bug, not just a timing nuisance: the library's own
+    // internal pane-cell table layout doesn't reliably re-derive from a
+    // resize() call the way its outer wrapper does, leaving the inner
+    // viewport clipped to whatever width existed at creation time even
+    // after resize() reports success (confirmed by inspecting the DOM: the
+    // canvas's own raster width was correct, but its immediate parent cell
+    // stayed stuck at an old, much narrower width with overflow:hidden,
+    // clipping the visible chart down to that stale size). Fix: never
+    // guess -- wait for ResizeObserver's first callback, which the spec
+    // guarantees fires once with the container's real settled size, and
+    // build the chart with that from the very first frame instead of
+    // creating it wrong and trying to correct it after the fact.
+    var firstSizeResolve;
+    var sizeReady = new Promise(function (resolve) { firstSizeResolve = resolve; });
+
+    new ResizeObserver(function (entries) {
+      var box = entries[0].contentRect;
+      if (box.width <= 0 || box.height <= 0) return;
+      if (firstSizeResolve) {
+        firstSizeResolve({ width: box.width, height: box.height });
+        firstSizeResolve = null;
+      } else if (chart) {
+        chart.resize(box.width, box.height, true);
+        stretchToFill(chart, pointCount);
+      }
+    }).observe(canvas);
+
+    function build(width, height) {
       chart = LightweightCharts.createChart(canvas, {
-        autoSize: true,
+        width: width,
+        height: height,
         layout: {
           background: { type: "solid", color: "transparent" },
           textColor: css("--text-2"),
@@ -121,7 +194,8 @@
         },
         timeScale: {
           borderColor: css("--border"), fixLeftEdge: true, fixRightEdge: true,
-          timeVisible: false, secondsVisible: false
+          timeVisible: false, secondsVisible: false,
+          tickMarkFormatter: defaultTickFormatter
         },
         crosshair: {
           mode: LightweightCharts.CrosshairMode.Magnet,
@@ -170,19 +244,30 @@
       if (controller) controller.abort();
       controller = new AbortController();
 
-      return fetch("/api/chart/" + encodeURIComponent(ticker) + "?range=" + range,
-                   { signal: controller.signal })
-        .then(function (r) {
-          if (!r.ok) throw new Error(r.status === 404 ? "No price history" : "Couldn't load prices");
-          return r.json();
-        })
-        .then(function (d) {
-          if (!chart) build();
+      return Promise.all([
+        fetch("/api/chart/" + encodeURIComponent(ticker) + "?range=" + range,
+             { signal: controller.signal })
+          .then(function (r) {
+            if (!r.ok) throw new Error(r.status === 404 ? "No price history" : "Couldn't load prices");
+            return r.json();
+          }),
+        // Resolved once, by the first real ResizeObserver callback -- see
+        // the note above. Already resolved on every load() after the
+        // first, so this only actually waits on that very first call.
+        sizeReady,
+      ])
+        .then(function (results) {
+          var d = results[0], size = results[1];
+          if (!chart) build(size.width, size.height);
+          chart.applyOptions({ timeScale: {
+            tickMarkFormatter: range === "max" ? yearOnlyTickFormatter : defaultTickFormatter
+          } });
           firstValue = d.points.length ? d.points[0][1] : null;
+          pointCount = d.points.length;
           line.setData(d.points.map(function (p) {
             return { time: toUnixTime(p[0]), value: p[1] };
           }));
-          chart.timeScale().fitContent();
+          stretchToFill(chart, pointCount);
 
           idle = {
             price: d.last, change: d.change, changePct: d.change_pct,
