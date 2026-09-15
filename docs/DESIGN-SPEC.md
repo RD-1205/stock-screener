@@ -35,7 +35,22 @@ market:
 | Benzinga | ~$166/mo | Too expensive at this stage |
 | NewsAPI | $449/mo for commercial | No |
 
-**Recommendation: make the feed filings-first.**
+**Update 2026-09 (built, live on the homepage):** the actual ask turned out to
+be broader than filings — "geopolitical news / tech news and everything that
+revolves around the stock and moves them," e.g. a 10-year Treasury yield
+story, not a company's own 8-K. **The feed is general-market-news-first**,
+via Finnhub's free tier (`screener/news.py`, same key as `quotes.py`):
+headline, source, timestamp, link out to the original article — never
+republish the body, per Finnhub's terms and the site's own house rule.
+Verified live against the real key: `/news?category=general` returns exactly
+this kind of story (sanctions, shipping-lane conflict, rate-sensitive
+business news), not company press releases.
+
+Filing events (8-K decoded to plain English, Form 4, 13D/G, earnings
+arrivals) are still a real differentiator and still worth building — just as
+a **tagged category on top of the general feed**, not the primary content, and
+not yet built. Original filings-first reasoning kept below for that
+follow-up:
 
 An 8-K is, by definition, a material event the company was legally required to
 disclose — an acquisition, an executive departure, a restructuring, a material
@@ -43,7 +58,7 @@ agreement. That *is* news, it is free, it is structured, it arrives before most
 journalism about it, and it fits a product whose entire premise is "we read the
 filings."
 
-Concretely, the landing feed is built from:
+A filings-tagging pass would add:
 
 - **8-K filings**, with the item number decoded into plain English
   (Item 5.02 → "Executive departure or appointment")
@@ -51,10 +66,10 @@ Concretely, the landing feed is built from:
   from XBRL and compared to the prior period
 - **Form 4** — notable insider buys and sells
 - **SC 13D/G** — someone crossed 5% ownership
-- **Third-party headlines** as a secondary strip, via Finnhub's free tier
 
-This is more differentiated than a generic news aggregator, and it means the
-landing page is genuinely yours rather than a reskinned feed everyone else has.
+Layered onto the general feed as filters/tags, this is more differentiated
+than a generic news aggregator competitors run, without giving up "genuinely
+market-moving news" as the homepage's actual lead content.
 
 **Licensing rule, non-negotiable:** for third-party news, display headline +
 source + timestamp + link only. Never republish article bodies. Most providers'

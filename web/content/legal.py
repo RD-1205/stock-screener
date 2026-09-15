@@ -187,6 +187,22 @@ yet on a freshly-launched gauge. Until then, each raw ratio is mapped onto
 0–100 using a fixed range rather than a statistical norm — an honest
 approximation while <code>sentiment</code> data accumulates day by day.</p>
 
+<h2 id="news">Market news</h2>
+<p>The homepage news feed is general market-moving headlines — macro,
+geopolitical, business — not just filings about individual companies. There
+is no free, fully-licensed comprehensive news API, so this uses
+<a href="https://finnhub.io" target="_blank" rel="noopener">Finnhub's</a>
+free tier: the same key already used for delayed quotes elsewhere on the
+site.</p>
+<p>We show headline, source, and timestamp, and link out to the original
+article. We never republish article bodies — that's both a licensing
+requirement and the honest way to do this: we didn't report it, we're
+pointing you to whoever did.</p>
+<p>This is not curated or fact-checked by us beyond what Finnhub's feed
+provides. If the feed looks empty, it means no <code>FINNHUB_API_KEY</code>
+is configured or the provider is temporarily unreachable — not that nothing
+happened in the market that day.</p>
+
 <h2>Known limitations</h2>
 <p>Stated plainly, because every one of these affects how you should read the
 numbers:</p>

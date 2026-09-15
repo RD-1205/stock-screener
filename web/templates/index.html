@@ -75,12 +75,6 @@
     </div>
   </form>
 
-  <div class="chips">
-    {% for label, query in examples %}
-      <span class="chip" data-example-q="{{ query }}">{{ label }}</span>
-    {% endfor %}
-  </div>
-
   {% if not vintages %}
     <div class="note">
       No historical vintages built yet. Run
@@ -89,6 +83,28 @@
       date, using only filings that existed then.
     </div>
   {% endif %}
+</div>
+
+<h2>Ready-made screens</h2>
+<p class="sub">Ready-made starting points. Run one here, or open its permanent link.</p>
+<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">
+  {% for c in screens %}
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:var(--sp-2)">
+        <strong style="font-size:var(--fs-sm)">{{ c.label }}</strong>
+        <span class="dim mono" style="font-size:var(--fs-xs);white-space:nowrap">
+          {% if c.count is not none %}{{ c.count }} matches{% else %}—{% endif %}
+        </span>
+      </div>
+      <code class="mono" style="display:block;font-size:var(--fs-xs);color:var(--text-3);
+            background:var(--surface-2);border-radius:var(--radius-sm);
+            padding:var(--sp-2);margin:var(--sp-2) 0;word-break:break-word">{{ c.query }}</code>
+      <div class="row" style="gap:var(--sp-2)">
+        <button type="button" class="chip" data-example-q="{{ c.query }}" style="flex:1">Run here</button>
+        <a class="btn btn-secondary" href="/screens/{{ c.slug }}" title="Permanent link to this screen">Permalink</a>
+      </div>
+    </div>
+  {% endfor %}
 </div>
 
 <h2>Results</h2>
@@ -111,5 +127,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', path='js/ranges.js') }}" defer></script>
+<script src="{{ url_for('static', path='js/ranges.js') }}?v={{ static_version('js/ranges.js') }}" defer></script>
 {% endblock %}

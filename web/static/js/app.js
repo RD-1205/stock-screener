@@ -50,6 +50,45 @@
     if (m) { e.preventDefault(); setPref("data-motion", KEYS.motion, m.dataset.setMotion); }
   });
 
+  // ---- mood gauge: hover/tap/focus a colour to see what it means --------
+  (function () {
+    var caption = document.getElementById("mood-zone-caption");
+    if (!caption) return;
+    var arcs = document.querySelectorAll(".mood-arc");
+    var defaultLabel = caption.dataset.defaultLabel;
+    var defaultDesc = caption.dataset.defaultDesc;
+
+    function setCaption(label, desc) {
+      caption.textContent = "";
+      var strong = document.createElement("strong");
+      strong.textContent = label;
+      caption.append(strong, " — " + desc);
+    }
+
+    function show(arc) {
+      arcs.forEach(function (a) { a.classList.toggle("is-active", a === arc); });
+      setCaption(arc.dataset.zoneLabel, arc.dataset.zoneDesc);
+    }
+
+    function reset() {
+      arcs.forEach(function (a) { a.classList.remove("is-active"); });
+      setCaption(defaultLabel, defaultDesc);
+    }
+
+    arcs.forEach(function (arc) {
+      arc.addEventListener("mouseenter", function () { show(arc); });
+      arc.addEventListener("focus", function () { show(arc); });
+      arc.addEventListener("mouseleave", reset);
+      arc.addEventListener("blur", reset);
+      // Tap-to-pin on touch: a second tap on the same zone (or elsewhere)
+      // returns to today's actual reading rather than staying stuck.
+      arc.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (arc.classList.contains("is-active")) reset(); else show(arc);
+      });
+    });
+  })();
+
   // ---- search palette placeholder --------------------------------------
   // Wired properly in build step 2 (R2). For now Cmd/Ctrl-K focuses the hero
   // search if it's on the page, otherwise navigates to /search. Shipping the

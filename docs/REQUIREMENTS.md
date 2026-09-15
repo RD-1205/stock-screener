@@ -12,7 +12,8 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done
 > "the landing page should be a news page affecting various listed market
 > companies with basic options"
 
-- [ ] **R1.1** Market news feed as the primary landing content
+- [x] **R1.1** Market news feed as the primary landing content — done
+      2026-09, `screener/news.py` + homepage "Market news" section
 - [ ] **R1.2** News items tagged to the companies they affect, linking to
       `/stocks/{ticker}`
 - [ ] **R1.3** Basic filter controls on the feed — sector, market cap band,
@@ -20,10 +21,11 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done
 - [ ] **R1.4** Market overview strip: index levels, breadth, biggest movers
 - [ ] **R1.5** Feed paginates / infinite-scrolls without a full page reload
 
-**Engineering note:** primary source is SEC 8-K and other material filings
-(free, structured, on-brand), augmented with third-party headlines. See
-`DESIGN-SPEC.md` §1.1 — this is the one requirement with a real cost and
-licensing implication.
+**Engineering note (updated 2026-09):** the real ask is general market-moving
+news first (macro, geopolitical, rates — "US 20yr hit 5%", not just company
+press releases), with SEC filing events (8-K decoded, Form 4, 13D/G) as a
+tagged category layered on top, not the primary source. See `DESIGN-SPEC.md`
+§1.1 for the full writeup and the reasoning that got flipped.
 
 ## R2 — Big, beautiful, interactive search on the home screen
 

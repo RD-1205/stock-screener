@@ -456,11 +456,13 @@ tbody tr:hover { background: var(--surface-2); }
    Server-rendered SVG, same approach as the revenue bar_chart() above --
    see web/app.py:mood_gauge_svg(). */
 .mood-dial { width: 100%; max-width: 320px; margin: 0 auto; }
+.mood-arc { cursor: pointer; transition: opacity .12s ease; outline: none; }
 .mood-arc-extreme-fear { fill: var(--down); }
 .mood-arc-fear { fill: var(--down); opacity: .5; }
 .mood-arc-neutral { fill: var(--border-strong); }
 .mood-arc-greed { fill: var(--up); opacity: .5; }
 .mood-arc-extreme-greed { fill: var(--up); }
+.mood-arc:hover, .mood-arc:focus-visible, .mood-arc.is-active { opacity: 1 !important; }
 .mood-needle { stroke: var(--text-1); stroke-width: 2.5; stroke-linecap: round; }
 .mood-needle-hub { fill: var(--text-1); }
 

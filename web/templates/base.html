@@ -23,16 +23,16 @@ var m=s.getItem('ui.motion');if(m)r.setAttribute('data-motion',m);}catch(e){}})(
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}?v={{ static_version('css/tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}?v={{ static_version('css/base.css') }}">
 {% block styles %}{% endblock %}
 
 <link rel="search" type="application/opensearchdescription+xml" title="{{ site_name }}" href="/opensearch.xml">
 {% if noindex %}<meta name="robots" content="noindex, follow">{% endif %}
 
 <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
-<script src="{{ url_for('static', path='js/app.js') }}" defer></script>
-<script src="{{ url_for('static', path='js/tape.js') }}" defer></script>
+<script src="{{ url_for('static', path='js/app.js') }}?v={{ static_version('js/app.js') }}" defer></script>
+<script src="{{ url_for('static', path='js/tape.js') }}?v={{ static_version('js/tape.js') }}" defer></script>
 </head>
 
 <body>

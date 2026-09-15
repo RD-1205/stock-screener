@@ -4,7 +4,7 @@
     {
       "name": "us-screener",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "screener.cli", "serve", "--port", "8000"],
+      "runtimeArgs": ["-m", "screener.cli", "serve", "--port", "8000", "--reload"],
       "port": 8000
     }
   ]

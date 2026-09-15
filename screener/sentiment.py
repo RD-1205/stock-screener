@@ -131,19 +131,33 @@ def _breadth(conn):
 
 
 ZONES = [
-    (0, 20, "extreme-fear", "Extreme fear"),
-    (20, 40, "fear", "Fear"),
-    (40, 60, "neutral", "Neutral"),
-    (60, 80, "greed", "Greed"),
-    (80, 101, "extreme-greed", "Extreme greed"),
+    (0, 20, "extreme-fear", "Extreme fear",
+     "Prices well below their recent trend and broad selling pressure -- "
+     "often when panic overshoots, not a forecast of what happens next."),
+    (20, 40, "fear", "Fear",
+     "More selling pressure than buying across the companies we track."),
+    (40, 60, "neutral", "Neutral",
+     "No strong lean either way in momentum, price strength, or volume."),
+    (60, 80, "greed", "Greed",
+     "More buying pressure than selling, with prices pushing above trend."),
+    (80, 101, "extreme-greed", "Extreme greed",
+     "Broad, strong upward momentum -- often when optimism overshoots, "
+     "not a forecast of what happens next."),
 ]
 
 
 def zone_for(score):
-    for lo, hi, slug, label in ZONES:
+    for lo, hi, slug, label, _desc in ZONES:
         if lo <= score < hi:
             return slug, label
     return ZONES[-1][2], ZONES[-1][3]
+
+
+def zone_description(slug):
+    for _lo, _hi, s, _label, desc in ZONES:
+        if s == slug:
+            return desc
+    return ""
 
 
 def compute(conn):

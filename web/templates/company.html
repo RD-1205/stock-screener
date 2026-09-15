@@ -3,7 +3,7 @@
 {% from "_partials/fintable.html" import fintable %}
 {% block title %}{{ c['ticker'] }} — {{ c['name'] }} share price and financials{% endblock %}
 {% block description %}{{ c['name'] }} ({{ c['ticker'] }}) share price, financials with YoY growth, ratio history and peers, from SEC EDGAR filings.{% endblock %}
-{% block scripts %}<script src="{{ url_for('static', path='js/chart.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='js/chart.js') }}?v={{ static_version('js/chart.js') }}" defer></script>{% endblock %}
 
 {% block content %}
 

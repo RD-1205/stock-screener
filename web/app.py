@@ -13,6 +13,7 @@ Run:  python -m screener.cli serve
 Docs: http://127.0.0.1:8000/api/docs
 """
 
+import html
 import math
 import os
 import sys
@@ -28,7 +29,7 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import (analysis, browse, db, quotes, screen, sentiment,  # noqa: E402
+from screener import (analysis, browse, db, news, quotes, screen, sentiment,  # noqa: E402
                       series, transform)
 from screener.concepts import METRICS                        # noqa: E402
 from web.content import legal                                # noqa: E402
@@ -74,12 +75,29 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
-app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """Force a conditional GET on every static-asset request.
+
+    Plain StaticFiles sends Last-Modified/ETag but no Cache-Control, which
+    leaves the browser to guess a freshness window (RFC 7234's "heuristic
+    caching" -- roughly 10% of the file's age). That guess can span minutes
+    to hours, so a JS/CSS edit can silently keep serving the pre-edit file
+    to an already-open tab with no error, no cache-bust needed to explain
+    it. `no-cache` still lets the browser cache the body, it just always
+    revalidates first -- a cheap 304 when unchanged, so this costs a round
+    trip, not a re-download.
+    """
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=os.path.join(HERE, "static")), name="static")
 
 NAV = [
     ("/screener", "Screener"),
     ("/stocks", "Stocks"),
-    ("/screens", "Screens"),
     ("/lists", "Lists"),
     ("/coverage", "Coverage"),
 ]
@@ -204,6 +222,25 @@ def render_cell(value, kind):
 
 
 templates.env.globals["render_cell"] = render_cell
+templates.env.globals["zone_description"] = sentiment.zone_description
+
+
+def static_version(rel_path):
+    """File mtime as a cache-busting query param for a static asset.
+
+    Paired with RevalidatingStaticFiles above: that makes a *server* restart
+    always serve fresh bytes; this makes an *already-open tab* pick them up
+    too, by changing the URL (and therefore the browser's cache key)
+    whenever the file's contents actually change, rather than relying on
+    every page load paying a revalidation round trip.
+    """
+    try:
+        return str(int(os.path.getmtime(os.path.join(HERE, "static", rel_path))))
+    except OSError:
+        return "0"
+
+
+templates.env.globals["static_version"] = static_version
 
 
 # ---- template globals -----------------------------------------------------
@@ -295,9 +332,7 @@ def run_screen(conn, q, as_of, order, direction, limit):
 def home(request: Request):
     """Landing page.
 
-    Currently the shell plus what we can honestly show from real data. The
-    filing news feed (R1) lands in a later build step -- stubbing it with
-    fake data now would just hide how much is left.
+    Currently the shell plus what we can honestly show from real data.
     """
     conn = get_conn()
     try:
@@ -312,10 +347,14 @@ def home(request: Request):
             mood_svg = mood_gauge_svg(mood["composite"])
     except Exception:                                   # noqa: BLE001
         mood = mood_svg = None            # never break the landing page over this
+    try:
+        headlines = news.general(limit=10)
+    except Exception:                                   # noqa: BLE001
+        headlines = []                    # never break the landing page over this
 
     return templates.TemplateResponse(request, "pages/home.html", {
-        "largest": largest, "total": total, "examples": EXAMPLES, "mood": mood,
-        "mood_svg": mood_svg,
+        "largest": largest, "total": total, "mood": mood,
+        "mood_svg": mood_svg, "headlines": headlines,
     })
 
 
@@ -338,6 +377,7 @@ def screener(request: Request,
         "q": q, "as_of": as_of, "order": order,
         "dir": dir, "limit": limit, "rows": rows, "error": error,
         "cols": TABLE_COLS, "examples": EXAMPLES, "vintages": vintages,
+        "screens": _screen_cards(conn),
         "fields": sorted(set(screen.COLUMNS)),
         "count": conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0],
         # /screener?q=... has unbounded parameter combinations, so only the
@@ -443,14 +483,13 @@ def stocks_index(request: Request, sector: str = "", band: str = "",
     })
 
 
-@app.get("/screens", response_class=HTMLResponse)
-def screens_index(request: Request):
-    """Curated screens.
-
-    Two jobs: onboarding for people who don't know what to type, and indexable
-    landing pages. Live match counts make them feel alive rather than static.
+def _screen_cards(conn):
+    """Curated screens with live match counts -- shared by the screener
+    page's "ready-made" section and the standalone /screens gallery. Two
+    jobs: onboarding for people who don't know what to type, and (via
+    /screens/{slug}) indexable landing pages. Live counts make them feel
+    alive rather than static.
     """
-    conn = get_conn()
     cards = []
     for slug, (label, query) in SCREENS.items():
         try:
@@ -458,8 +497,17 @@ def screens_index(request: Request):
         except Exception:                               # noqa: BLE001
             count = None
         cards.append({"label": label, "query": query, "count": count, "slug": slug})
+    return cards
+
+
+@app.get("/screens", response_class=HTMLResponse)
+def screens_index(request: Request):
+    """Curated screens gallery. Not in the primary nav (folded into
+    /screener directly -- see the "Ready-made screens" section there) but
+    still a real page: linked from the footer and home, and each
+    /screens/{slug} stays the canonical indexable URL for that screen."""
     return templates.TemplateResponse(request, "pages/screens_index.html",
-                                      {"cards": cards})
+                                      {"cards": _screen_cards(get_conn())})
 
 
 @app.get("/screens/{slug}", response_class=HTMLResponse)
@@ -886,7 +934,7 @@ def bar_chart(pairs, width=560, height=140):
 
 # score 0-100 -> zone slug, matching screener.sentiment.ZONES exactly so the
 # arc segments and the text label always agree with each other.
-_MOOD_ZONE_SLUGS = ["extreme-fear", "fear", "neutral", "greed", "extreme-greed"]
+_MOOD_ZONE_SLUGS = [z[2] for z in sentiment.ZONES]
 
 
 def _polar(cx, cy, r, score):
@@ -903,24 +951,30 @@ def _polar(cx, cy, r, score):
 
 def mood_gauge_svg(composite, width=300, height=180):
     """Server-rendered semicircle dial: 5 coloured zone bands, a needle at
-    the current score. No JS, no chart library -- same approach as
-    bar_chart() above."""
+    the current score. No chart library -- same approach as bar_chart()
+    above. Each band carries its label/description as data attributes
+    (`web/static/js/app.js` reads them) so hovering or tapping a colour
+    explains what it means, and a plain `<title>` covers browsers/inputs
+    that skip the JS tooltip entirely."""
     cx, cy = width / 2, height - 20
     r_out, r_in = height - 40, height - 75
 
     bands = []
-    for i, slug in enumerate(_MOOD_ZONE_SLUGS):
+    for i, (_lo, _hi, slug, label, desc) in enumerate(sentiment.ZONES):
         lo, hi = i * 20, (i + 1) * 20
         x1o, y1o = _polar(cx, cy, r_out, lo)
         x2o, y2o = _polar(cx, cy, r_out, hi)
         x1i, y1i = _polar(cx, cy, r_in, lo)
         x2i, y2i = _polar(cx, cy, r_in, hi)
+        label_esc, desc_esc = html.escape(label), html.escape(desc)
         bands.append(
-            f'<path class="mood-arc-{slug}" d="'
+            f'<path class="mood-arc mood-arc-{slug}" tabindex="0" '
+            f'data-zone-label="{label_esc}" data-zone-desc="{desc_esc}" d="'
             f'M {x1o:.1f} {y1o:.1f} '
             f'A {r_out:.1f} {r_out:.1f} 0 0 1 {x2o:.1f} {y2o:.1f} '
             f'L {x2i:.1f} {y2i:.1f} '
-            f'A {r_in:.1f} {r_in:.1f} 0 0 0 {x1i:.1f} {y1i:.1f} Z"/>'
+            f'A {r_in:.1f} {r_in:.1f} 0 0 0 {x1i:.1f} {y1i:.1f} Z">'
+            f'<title>{label_esc}: {desc_esc}</title></path>'
         )
 
     score = max(0.0, min(100.0, composite))
