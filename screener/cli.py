@@ -18,7 +18,7 @@ import os
 import sys
 from datetime import date
 
-from . import db, edgar, ingest, prices, screen, sentiment, splits, transform
+from . import db, edgar, ingest, news, picker, prices, screen, sentiment, splits, transform
 
 
 def _load_dotenv():
@@ -113,20 +113,34 @@ def ingest_bulk(conn, args):
 
 def cmd_prices(args):
     conn = db.connect(args.db)
-    params = []
-    q = "SELECT DISTINCT ticker FROM companies WHERE ticker IS NOT NULL"
-    if args.tickers:
-        wanted = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
-        q += f" AND ticker IN ({','.join('?' * len(wanted))})"
-        params = wanted
-    elif args.only_ingested:
-        q += " AND cik IN (SELECT cik FROM facts)"
+
     if args.unpriced and not args.tickers:
-        q += " AND ticker NOT IN (SELECT DISTINCT ticker FROM prices)"
-    q += " ORDER BY ticker"
-    if args.limit and not args.tickers:
-        q += f" LIMIT {int(args.limit)}"
-    tickers = [r[0] for r in conn.execute(q, params)]
+        # Ranked, not alphabetical -- see screener/picker.py. News is best
+        # effort: no key or a dead provider just means no news bonus.
+        try:
+            headlines = [h["headline"] for h in news.general(limit=50)]
+        except Exception:                       # noqa: BLE001
+            headlines = []
+        picks = picker.pick(conn, limit=args.limit or 20, headlines=headlines)
+        for t, name, reason in picks:
+            print(f"  {t:<8} {name or '':<38} {reason}")
+        tickers = [t for t, _n, _r in picks]
+        if args.dry_run:
+            print(f"(dry run: {len(tickers)} tickers picked, nothing fetched)")
+            return
+    else:
+        params = []
+        q = "SELECT DISTINCT ticker FROM companies WHERE ticker IS NOT NULL"
+        if args.tickers:
+            wanted = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+            q += f" AND ticker IN ({','.join('?' * len(wanted))})"
+            params = wanted
+        elif args.only_ingested:
+            q += " AND cik IN (SELECT cik FROM facts)"
+        q += " ORDER BY ticker"
+        if args.limit and not args.tickers:
+            q += f" LIMIT {int(args.limit)}"
+        tickers = [r[0] for r in conn.execute(q, params)]
 
     fetch = prices.fetch_eodhd if args.provider == "eodhd" else prices.fetch_stooq
     total = 0
@@ -314,7 +328,10 @@ def main(argv=None):
     g.add_argument("--provider", choices=["stooq", "eodhd"], default="stooq")
     g.add_argument("--only-ingested", action="store_true", default=True)
     g.add_argument("--unpriced", action="store_true",
-                    help="skip tickers that already have rows in the prices table")
+                    help="only tickers with no prices yet, ranked by size and "
+                         "news (not alphabetical)")
+    g.add_argument("--dry-run", action="store_true",
+                    help="with --unpriced: show the picks, fetch nothing")
     g.set_defaults(func=cmd_prices)
 
     sub.add_parser("splits", help="backfill split detection for already-ingested companies") \

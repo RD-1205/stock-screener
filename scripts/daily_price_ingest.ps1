@@ -3,7 +3,18 @@
 # market-mood gauge now that new prices have landed.
 #
 # Run manually with:  powershell -File scripts\daily_price_ingest.ps1
-# Wired to Windows Task Scheduler task "us-screener-daily-price-ingest".
+#
+# IMPORTANT -- this file lives under OneDrive, and that's fine for manual
+# runs, but Task Scheduler cannot reliably launch a script from a OneDrive
+# Files-On-Demand folder (confirmed 2026-09-15: schtasks /Run reports
+# success and exit code 0, but the script body never actually executes --
+# no log line, no data pulled -- while the identical command run from an
+# interactive shell works every time). The scheduled task therefore points
+# at a plain local copy outside OneDrive:
+#   C:\Users\rudra\AppData\Local\us-screener\daily_price_ingest.ps1
+# That copy hardcodes $root instead of deriving it from $PSScriptRoot (it
+# doesn't live next to the repo). Edit the logic here, then copy it over --
+# see the "redeploy" one-liner in that file's own header comment.
 
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
