@@ -167,7 +167,12 @@
 {% if revenue_chart %}
 <section>
   <h2>Revenue by fiscal year</h2>
-  <div class="panel">{{ revenue_chart|safe }}</div>
+  <div class="panel">
+    {{ revenue_chart|safe }}
+    <p class="dim" data-chart-caption style="font-size:var(--fs-sm);margin:var(--sp-2) 0 0">
+      Click, tap, or tab to a bar for the exact figure.
+    </p>
+  </div>
 </section>
 {% endif %}
 

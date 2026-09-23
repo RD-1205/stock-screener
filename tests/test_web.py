@@ -71,6 +71,26 @@ def test_results_filter_actually_filters():
     print("  OK  filters change the result set")
 
 
+def test_csv_export_matches_the_results_table():
+    c = client()
+    r = c.get("/results.csv", params={"q": "net_margin > 25"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert 'attachment; filename="us-screener-' in r.headers["content-disposition"]
+    lines = r.text.strip().splitlines()
+    assert lines[0] == "Ticker,Company,Mkt cap,Price,P/E,P/B,ROE,Net mgn,D/E,Rev CAGR"
+    assert "LEGC" not in r.text, "CSV export must respect the same filter as /results"
+    assert "BANQ" in r.text
+    print(f"  OK  CSV export: {len(lines) - 1} rows, header matches the results table")
+
+
+def test_csv_export_rejects_bad_query_with_400_not_a_broken_file():
+    c = client()
+    r = c.get("/results.csv", params={"q": "pe > 1; DROP TABLE snapshot"})
+    assert r.status_code == 400, "a malformed query must not silently download an empty/broken CSV"
+    print("  OK  a bad query 400s instead of downloading a broken file")
+
+
 def test_bad_query_shows_error_not_500():
     r = client().get("/results", params={"q": "hack > 1"})
     assert r.status_code == 200, "a bad query should not 500"

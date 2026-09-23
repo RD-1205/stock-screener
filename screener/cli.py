@@ -142,15 +142,39 @@ def cmd_prices(args):
             q += f" LIMIT {int(args.limit)}"
         tickers = [r[0] for r in conn.execute(q, params)]
 
-    fetch = prices.fetch_eodhd if args.provider == "eodhd" else prices.fetch_stooq
     total = 0
-    for i, t in enumerate(tickers, 1):
-        try:
-            total += prices.store(conn, fetch(t))
-        except Exception as e:                  # noqa: BLE001
-            print(f"  ! {t}: {e}")
-        if i % 25 == 0:
-            print(f"  {i}/{len(tickers)}  {total:,} bars")
+    if args.provider == "yfinance":
+        # One batched call beats one-request-per-ticker by roughly 30x in
+        # practice (all 805 of this project's own tickers, 5y each, in
+        # ~25s) -- see screener/prices.py's module docstring for the
+        # measurement this is based on. Store as each chunk completes
+        # (on_chunk), not after the whole run -- a full-universe backfill
+        # can run long enough that losing 100% of the progress to a crash
+        # 90% of the way through would be a real cost, not just an
+        # inconvenience.
+        seen = set()
+
+        def _store_chunk(chunk_result):
+            nonlocal total
+            for t, rows in chunk_result.items():
+                seen.add(t)
+                total += prices.store(conn, rows)
+
+        prices.fetch_yfinance_batch(
+            tickers, on_chunk=_store_chunk,
+            progress=lambda done, n: print(f"  fetched {done}/{n}  {total:,} bars so far"))
+        for t in tickers:
+            if t not in seen:
+                print(f"  ! {t}: no data returned")
+    else:
+        fetch = prices.fetch_eodhd if args.provider == "eodhd" else prices.fetch_stooq
+        for i, t in enumerate(tickers, 1):
+            try:
+                total += prices.store(conn, fetch(t))
+            except Exception as e:              # noqa: BLE001
+                print(f"  ! {t}: {e}")
+            if i % 25 == 0:
+                print(f"  {i}/{len(tickers)}  {total:,} bars")
     print(f"{total:,} price bars")
 
 
@@ -325,7 +349,7 @@ def main(argv=None):
     g = sub.add_parser("prices")
     g.add_argument("--limit", type=int)
     g.add_argument("--tickers", help="comma-separated tickers, e.g. AAPL,MSFT (overrides --limit)")
-    g.add_argument("--provider", choices=["stooq", "eodhd"], default="stooq")
+    g.add_argument("--provider", choices=["stooq", "eodhd", "yfinance"], default="stooq")
     g.add_argument("--only-ingested", action="store_true", default=True)
     g.add_argument("--unpriced", action="store_true",
                     help="only tickers with no prices yet, ranked by size and "

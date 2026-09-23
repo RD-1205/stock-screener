@@ -71,7 +71,11 @@
       <input type="hidden" name="order" value="{{ order }}">
       <input type="hidden" name="dir" value="{{ dir }}">
       <input type="hidden" name="limit" value="{{ limit }}">
-      <button type="submit" style="margin-left:auto">Run screen</button>
+      <button type="button" class="btn btn-secondary" data-export-csv
+              style="margin-left:auto" title="Download the current screen as CSV">
+        Export CSV
+      </button>
+      <button type="submit">Run screen</button>
     </div>
   </form>
 

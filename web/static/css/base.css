@@ -443,11 +443,17 @@ tbody tr:hover { background: var(--surface-2); }
 /* ------------------------------------------------------------------ charts */
 .bar-bg { background: var(--surface-3); border-radius: 3px; height: 7px; overflow: hidden; }
 .bar-fg { background: var(--accent); height: 100%; }
-.chart .bar { fill: var(--accent); opacity: .78; }
-.chart .bar:hover { opacity: 1; }
+.chart .bar { fill: var(--accent); opacity: .78; cursor: pointer; outline: none; }
+.chart .bar:hover, .chart .bar:focus-visible, .chart .bar.is-active { opacity: 1; }
+.chart .bar.is-active { fill: var(--text-1); }
 .chart .lbl {
   fill: var(--text-2); font-size: var(--fs-2xs);
   text-anchor: middle; font-family: var(--font-mono);
+}
+.chart .val-lbl {
+  fill: var(--text-3); font-size: var(--fs-2xs);
+  text-anchor: middle; font-family: var(--font-mono);
+  pointer-events: none;
 }
 
 /* --------------------------------------------------------------- mood gauge

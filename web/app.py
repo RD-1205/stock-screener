@@ -416,6 +416,37 @@ def results(request: Request,
     })
 
 
+@app.get("/results.csv")
+def results_csv(q: str = "", as_of: str = "", order: str = "market_cap",
+                dir: str = "desc", limit: int = 2000):
+    """Export the current screen as CSV -- the single most-requested
+    feature on screener.in, and cheap: same query engine, same columns as
+    the results table, no accounts needed. Capped well above what anyone
+    screens for by hand, so one URL can't be used to walk the whole
+    snapshot table in a single request."""
+    import csv
+    import io
+
+    conn = get_conn()
+    limit = max(1, min(limit, 5000))
+    try:
+        rows = run_screen(conn, q, as_of, order, dir, limit)
+    except screen.QueryError as e:
+        raise HTTPException(400, str(e))
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([label for _col, label, _kind in TABLE_COLS])
+    for r in rows:
+        writer.writerow([r[col] for col, _label, _kind in TABLE_COLS])
+
+    filename = f"us-screener-{as_of or date.today().isoformat()}.csv"
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/company/{ticker}")
 def company_legacy(ticker: str):
     """Permanent redirect to the new URL shape.
@@ -909,8 +940,15 @@ def annual_history(conn, cik, limit_years=10):
     return [(y, {m: by_year[y].get(m) for m in HISTORY_METRICS}) for y in years]
 
 
-def bar_chart(pairs, width=560, height=140):
-    """Server-rendered SVG. No JS, no chart library, no CDN -- it just works."""
+def bar_chart(pairs, width=560, height=160):
+    """Server-rendered SVG. No JS-required-to-render, no chart library, no
+    CDN -- every value is a real text label baked into the markup, visible
+    with zero interaction. A small amount of JS (app.js) additionally makes
+    each bar clickable/tappable/focusable, showing the exact underlying
+    number (no B/M/K rounding) in a caption the template renders alongside
+    this -- same interaction pattern as the mood gauge's zone bands, so a
+    hover/press/keyboard-focus habit learned on one chart works on both.
+    """
     pairs = [(y, v) for y, v in pairs if v is not None]
     if not pairs:
         return ""
@@ -920,12 +958,17 @@ def bar_chart(pairs, width=560, height=140):
     gap = width / max(n, 1)
     bars = []
     for i, (year, val) in enumerate(pairs):
-        h = max(2.0, (val / top) * (height - 28))
+        h = max(2.0, (val / top) * (height - 46))
         x = i * gap + (gap - bw) / 2
         y = height - h - 16
+        label = fmt_money(val)
+        exact = f"{val:,.0f}"
         bars.append(
             f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{h:.1f}" '
-            f'rx="2" class="bar"><title>{year}: {fmt_money(val)}</title></rect>'
+            f'rx="2" class="bar chart-bar" tabindex="0" '
+            f'data-label="{year}" data-value="{label}" data-exact="{exact}">'
+            f'<title>{year}: {label} ({exact})</title></rect>'
+            f'<text x="{x + bw/2:.1f}" y="{max(y - 6, 11):.1f}" class="val-lbl">{label}</text>'
             f'<text x="{x + bw/2:.1f}" y="{height - 3}" class="lbl">{year}</text>'
         )
     return (f'<svg viewBox="0 0 {width} {height}" class="chart" '

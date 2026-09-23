@@ -8,3 +8,10 @@ jinja2>=3.1
 
 # Tests (TestClient):
 httpx>=0.27
+
+# Optional: only needed for `prices --provider yfinance`. The pipeline's
+# stooq/eodhd paths still need nothing but stdlib -- yfinance is a real
+# dependency tree (pandas, numpy, lxml, curl_cffi...), so it's opt-in,
+# lazily imported inside screener/prices.py rather than imported at module
+# load. pip install yfinance if you want this provider.
+# yfinance>=1.7
