@@ -129,12 +129,34 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
     fell_back = False
 
     # A short range on a sparse history can return one point or none, which
-    # draws nothing. Fall back to everything we have rather than an empty box.
+    # draws nothing. Two different causes need two different responses:
+    #   stale  the ticker has plenty of history, it just hasn't been priced
+    #          in the last few days (the daily ingest doesn't always run) --
+    #          a window anchored to wall-clock `today` then asks for days
+    #          nobody has yet. Re-anchor the SAME window to the ticker's own
+    #          latest stored date instead of giving up on it.
+    #   sparse the ticker genuinely doesn't have much history at all. Only
+    #          now fall back to everything we hold, rather than an empty box.
+    # Anchoring to wall-clock `today` instead of the latest stored date used
+    # to be harmless when "everything" meant a handful of rows for a thin
+    # ticker -- it's not harmless once a ticker has 40+ years of history: a
+    # few stale days turned "5d" into "max" for every ticker whose price
+    # ingest hadn't run that day.
     if len(rows) < 2 and days is not None:
-        rows = [(r[0], r[1]) for r in conn.execute(
-            "SELECT date, close FROM prices WHERE ticker = ? "
-            "AND close IS NOT NULL ORDER BY date ASC", (ticker.upper(),))]
-        fell_back = True
+        latest = conn.execute(
+            "SELECT MAX(date) FROM prices WHERE ticker = ? AND close IS NOT NULL",
+            (ticker.upper(),)
+        ).fetchone()[0]
+        if latest and latest < as_of.isoformat():
+            cutoff = date.fromisoformat(latest) - timedelta(days=days)
+            rows = [(r[0], r[1]) for r in conn.execute(
+                "SELECT date, close FROM prices WHERE ticker = ? AND close IS NOT NULL "
+                "AND date >= ? ORDER BY date ASC", (ticker.upper(), cutoff.isoformat()))]
+        if len(rows) < 2:
+            rows = [(r[0], r[1]) for r in conn.execute(
+                "SELECT date, close FROM prices WHERE ticker = ? "
+                "AND close IS NOT NULL ORDER BY date ASC", (ticker.upper(),))]
+            fell_back = True
 
     # Full-history span drives which tabs are honest, even when this request
     # asked for a windowed slice.

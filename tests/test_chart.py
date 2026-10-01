@@ -98,17 +98,46 @@ def test_short_history_stays_daily_on_max():
 
 
 def test_short_range_falls_back_rather_than_drawing_nothing():
-    """Fixture prices are weekly, so a 1-month window can contain <2 points.
+    """A ticker with only one bar of real history can't fill any window.
 
     An empty chart box looks broken. Falling back to the full history is the
     honest degradation — and the response must admit it was a fallback.
+
+    (This used to be tested by asking for MODT's "1m" range as of a `today`
+    years past its last fixture price, relying on a stale-vs-today mismatch
+    to starve the window. That was actually exercising the bug reported
+    live — a stale-but-otherwise-healthy ticker falling back to its ENTIRE
+    history instead of its most recent real data — which series.fetch now
+    handles by re-anchoring to the ticker's own latest date first. A
+    genuinely sparse ticker, below, is the real case this fallback exists
+    for.)
     """
     _, conn = setup()
-    pts, meta = series.fetch(conn, "MODT", "1m", today=date(2030, 1, 1))
-    assert len(pts) >= 2, "sparse range should fall back to full history"
+    conn.execute(
+        "INSERT INTO prices (ticker, date, close) VALUES (?,?,?)",
+        ("SPARSE1", "2025-06-30", 10.0))
+    conn.commit()
+    pts, meta = series.fetch(conn, "SPARSE1", "1m", today=date(2025, 7, 15))
+    assert len(pts) >= 1, "sparse range should fall back to full history"
     assert meta["fell_back"] is True
     assert meta["partial"] is True
+    conn.execute("DELETE FROM prices WHERE ticker = 'SPARSE1'")
+    conn.commit()
     print("  OK  sparse range falls back instead of rendering an empty chart")
+
+
+def test_stale_ticker_gets_a_tight_window_not_full_history():
+    """The bug reported live: a ticker that HAS plenty of history but whose
+    price ingest hasn't run in a few days must still get the tight window it
+    asked for, re-anchored to its own latest date — not a dump of its entire
+    history just because wall-clock `today` has moved past the last bar."""
+    _, conn = setup()
+    pts, meta = series.fetch(conn, "MODT", "1m", today=date(2025, 7, 15))
+    assert meta["fell_back"] is False, meta
+    assert meta["span_days"] <= 35, meta
+    assert len(pts) >= 2
+    print(f"  OK  MODT '1m' with stale-but-recent data stays tight "
+          f"({meta['span_days']} days), not the full {meta['full_span_days']}-day history")
 
 
 def test_apply_quote_tips_last_point():
