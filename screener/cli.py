@@ -89,7 +89,16 @@ def cmd_ingest(args):
         q += f" AND ticker IN ({','.join('?' * len(wanted))})"
         params = wanted
     elif not args.refresh:
-        q += " AND cik NOT IN (SELECT cik FROM ingest_log WHERE status='ok')"
+        # 'empty' means we already tried and confirmed there's genuinely no
+        # XBRL to find -- a closed-end fund filing N-CSR, a foreign ADR on
+        # 20-F/6-K, a utility subsidiary whose facts live under its parent's
+        # CIK. Retrying it returns empty again, forever. Found the hard way:
+        # --limit 20 kept re-selecting the same 45 already-confirmed-empty,
+        # lowest-CIK companies every single run and never making progress.
+        # 'error' (a transient fetch failure) is NOT excluded here, so it's
+        # still retried automatically -- only a confirmed non-result should
+        # stop being retried without --refresh asking for it explicitly.
+        q += " AND cik NOT IN (SELECT cik FROM ingest_log WHERE status IN ('ok','empty'))"
     q += " ORDER BY cik"
     if args.limit and not args.tickers:
         q += f" LIMIT {int(args.limit)}"
