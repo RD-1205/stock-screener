@@ -102,7 +102,7 @@ def fetch_yfinance(ticker, period="max"):
 YFINANCE_CHUNK_SIZE = 100
 
 
-def fetch_yfinance_batch(tickers, period="max", progress=None, on_chunk=None):
+def fetch_yfinance_batch(tickers, period="max", progress=None, on_chunk=None, keep=True):
     """Many tickers via yfinance's own batching, chunked to bound memory.
 
     Returns {ticker: rows}, one entry per ticker that returned any data.
@@ -118,7 +118,9 @@ def fetch_yfinance_batch(tickers, period="max", progress=None, on_chunk=None):
     long-running full-universe backfill at 90% loses 100% of the progress;
     with it, whatever finished before the interruption is already saved.
     The full accumulated dict is still returned, for callers (and tests)
-    that just want one result at the end.
+    that just want one result at the end. Pass keep=False when `on_chunk`
+    already handles every chunk: a full-history pull of the whole universe
+    otherwise sits at ~2 GB until the last chunk, for nothing.
     """
     tickers = list(tickers)
     out = {}
@@ -128,7 +130,8 @@ def fetch_yfinance_batch(tickers, period="max", progress=None, on_chunk=None):
             chunk_result = _fetch_yfinance_chunk(chunk, period)
         except Exception:                                # noqa: BLE001
             chunk_result = {}  # this chunk failed; the rest still get a chance
-        out.update(chunk_result)
+        if keep:
+            out.update(chunk_result)
         if on_chunk:
             on_chunk(chunk_result)
         if progress:

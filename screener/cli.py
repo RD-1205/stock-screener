@@ -18,7 +18,8 @@ import os
 import sys
 from datetime import date
 
-from . import db, edgar, ingest, news, picker, prices, screen, sentiment, splits, transform
+from . import (db, edgar, ingest, news, picker, prices, refresh, screen, sentiment,
+               splits, transform)
 
 
 def _load_dotenv():
@@ -185,6 +186,19 @@ def cmd_prices(args):
             if i % 25 == 0:
                 print(f"  {i}/{len(tickers)}  {total:,} bars")
     print(f"{total:,} price bars")
+
+    # Market cap, P/E, P/B and P/S are price times (or over) a fundamental, and
+    # live in `snapshot`, so new prices are not visible anywhere until it is
+    # rebuilt. Do it here rather than relying on someone remembering.
+    if total:
+        print(f"snapshot rebuilt for {transform.build_snapshot(conn):,} companies")
+
+
+def cmd_refresh(args):
+    """The same run the web app does at startup (see screener/refresh.py)."""
+    result = refresh.run(db_path=args.db, ua=os.environ.get("SEC_USER_AGENT"), log=print)
+    if any(s["state"] == "error" for s in result["steps"]):
+        sys.exit(1)
 
 
 def cmd_splits(args):
@@ -375,6 +389,9 @@ def main(argv=None):
     sub.add_parser("snapshot").set_defaults(func=cmd_snapshot)
     sub.add_parser("sentiment", help="compute + store today's market mood reading") \
        .set_defaults(func=cmd_sentiment)
+    sub.add_parser("refresh", help="prices, gauge, new SEC filings, metrics -- what the "
+                                   "web app does at startup") \
+       .set_defaults(func=cmd_refresh)
 
     g = sub.add_parser("history", help="build point-in-time vintages")
     g.add_argument("--since", default="2015-01-01")

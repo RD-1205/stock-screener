@@ -333,13 +333,13 @@ tbody tr:hover { background: var(--surface-2); }
    values because they're the only bold, mono, light-coloured things in the
    row, and the dividers do the grouping that boxes used to.
    -------------------------------------------------------------------------- */
+/* Sits directly on the chart, under the section index, which already draws
+   the line above it. */
 .keystats {
   display: flex; flex-wrap: wrap;
   gap: 0 var(--sp-5);
-  padding: var(--sp-3) 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  margin-bottom: var(--sp-5);
+  padding: var(--sp-2) 0 var(--sp-3);
+  margin-bottom: var(--sp-2);
 }
 .keystat {
   display: flex; align-items: baseline; gap: var(--sp-2);
@@ -396,7 +396,7 @@ tbody tr:hover { background: var(--surface-2); }
 .subnav {
   display: flex; gap: var(--sp-4); flex-wrap: wrap;
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--sp-5); padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3); padding-bottom: var(--sp-2);
   font-size: var(--fs-md);
 }
 .subnav a { color: var(--text-2); padding-bottom: var(--sp-2); }
@@ -495,9 +495,16 @@ tbody tr:hover { background: var(--surface-2); }
 }
 .chart-legend-status { margin-left: auto; }
 
-/* Height, not just width, is what makes a chart feel substantial -- a wide
-   box with a squat line inside it is the exact complaint this fixes. */
-.chart-canvas { height: 460px; width: 100%; }
+/* Wide and fairly short (about 3:1, like Google Finance) so the stat rail,
+   chart and range tabs fit on one screen instead of the chart alone filling
+   it. The floor keeps phones from squashing the line flat. touch-action lets
+   a vertical swipe still scroll the page while a horizontal drag scrubs. */
+.chart-canvas {
+  width: 100%; aspect-ratio: 3 / 1;
+  min-height: 280px; max-height: 380px;
+  overflow: hidden;   /* content must never feed back into the box's height */
+}
+.chart-canvas canvas { display: block; touch-action: pan-y; }
 
 /* Plain text tabs, not boxed chips -- a range selector is chrome, not a set
    of equally-weighted choices, so it shouldn't compete visually with the

@@ -52,6 +52,14 @@
 
     </div>
 
+    {% set fresh = data_freshness() %}
+    {% if fresh.prices_through or fresh.running %}
+      <p class="dim mono" data-freshness style="font-size:var(--fs-xs);margin:0 0 var(--sp-3)">
+        {% if fresh.prices_through %}Prices through {{ fresh.prices_through }}{% endif %}
+        {% if fresh.filings_checked %} · SEC filings checked {{ fresh.filings_checked[:16]|replace('T', ' ') }} UTC{% endif %}
+        {% if fresh.running %} · updating{% if fresh.step %} ({{ fresh.step }}){% endif %}…{% endif %}
+      </p>
+    {% endif %}
     <div class="footer-bottom">
       <p class="disclaimer" style="margin:0">
         Fundamentals sourced from SEC EDGAR XBRL filings (public domain).

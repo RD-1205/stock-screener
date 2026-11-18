@@ -13,10 +13,12 @@ Run:  python -m screener.cli serve
 Docs: http://127.0.0.1:8000/api/docs
 """
 
+import contextlib
 import html
 import math
 import os
 import sys
+import threading
 import time
 from datetime import date
 from urllib.parse import quote_plus
@@ -29,8 +31,8 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import (analysis, browse, db, news, quotes, screen, sentiment,  # noqa: E402
-                      series, transform)
+from screener import (analysis, browse, db, news, quotes, refresh, screen,  # noqa: E402
+                      sentiment, series, transform)
 from screener.concepts import METRICS                        # noqa: E402
 from web.content import legal                                # noqa: E402
 
@@ -69,11 +71,33 @@ templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 SITE_NAME = os.environ.get("SITE_NAME", "us-screener")
 SITE_URL = os.environ.get("SITE_URL", "http://127.0.0.1:8000").rstrip("/")
 
+@contextlib.asynccontextmanager
+async def lifespan(_app):
+    """Bring everything up to date every time the platform starts: latest
+    prices, the market-mood gauge, any SEC filings we haven't ingested, and
+    the metrics derived from all of it (see screener/refresh.py for the
+    steps and their order).
+
+    Runs in a background thread so the site is up immediately; until a step
+    lands, pages show the last stored figures, and the footer says an update
+    is in progress. SCREENER_AUTO_REFRESH=0 turns it off (offline work).
+    Nothing in the refresh can stop the site from starting."""
+    _app.state.refresh_thread = None
+    if os.environ.get("SCREENER_AUTO_REFRESH", "1") != "0":
+        _app.state.refresh_thread = threading.Thread(
+            target=refresh.run, name="refresh", daemon=True,
+            kwargs=dict(db_path=os.environ.get("SCREENER_DB", "screener.db"),
+                        ua=os.environ.get("SEC_USER_AGENT"), log=print))
+        _app.state.refresh_thread.start()
+    yield
+
+
 app = FastAPI(
     title="us-screener",
     description="US equity fundamentals screener on free SEC EDGAR XBRL data.",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 class RevalidatingStaticFiles(StaticFiles):
     """Force a conditional GET on every static-asset request.
@@ -308,10 +332,46 @@ def tape_items():
     return items
 
 
+_fresh_cache = {"at": 0.0, "value": None}
+FRESHNESS_TTL = 30
+
+
+def data_freshness():
+    """How current the data on screen is, for the footer and /api/refresh.
+
+    Prices are read for one large, always-priced ticker rather than
+    MAX(date) over the whole table, which is millions of rows.
+    """
+    now = time.monotonic()
+    cached = _fresh_cache["value"]
+    run = refresh.status()
+    if cached and now - _fresh_cache["at"] < FRESHNESS_TTL:
+        return {**cached, "running": run["state"] == "running", "step": run["step"]}
+
+    value = {"prices_through": None, "filings_checked": None}
+    try:
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT MAX(p.date) FROM prices p WHERE p.ticker = "
+            "(SELECT ticker FROM snapshot WHERE ticker IS NOT NULL "
+            "ORDER BY market_cap DESC LIMIT 1)").fetchone()
+        value["prices_through"] = row[0] if row else None
+    except Exception:                                       # noqa: BLE001
+        pass
+    try:
+        row = get_conn().execute("SELECT MAX(checked_at) FROM filing_check").fetchone()
+        value["filings_checked"] = row[0] if row else None
+    except Exception:                                       # table not created yet
+        pass
+    _fresh_cache.update(at=now, value=value)
+    return {**value, "running": run["state"] == "running", "step": run["step"]}
+
+
 templates.env.globals.update(
     site_name=SITE_NAME,
     site_url=SITE_URL,
     nav_items=NAV,
+    data_freshness=data_freshness,
     footer_tickers=footer_tickers,
     tape_items=tape_items,
     tape_label=quotes.label,
@@ -875,14 +935,35 @@ def api_chart(ticker: str, range: str = series.DEFAULT_RANGE):
 
     When Finnhub is configured, the last point is tipped to the delayed quote
     so the chart end matches the company header.
+
+    1D and 5D come from intraday bars (points are ["YYYY-MM-DDTHH:MM", close]).
+    If those can't be had, 1D answers 503 -- there is no honest end-of-day
+    stand-in for a single day -- while 5D falls back to the last five daily
+    closes.
     """
     conn = get_conn()
+    if range in series.INTRADAY_RANGES:
+        if not conn.execute("SELECT 1 FROM prices WHERE ticker = ? LIMIT 1",
+                            (ticker.upper(),)).fetchone():
+            raise HTTPException(404, f"No price history for {ticker.upper()}")
+        got = series.fetch_intraday(conn, ticker, range)
+        if got:
+            return {"points": got[0], **got[1]}
+        if range == "1d":
+            raise HTTPException(503, "Intraday prices are unavailable right now")
     points, meta = series.fetch(conn, ticker, range)
     if not points:
         raise HTTPException(404, f"No price history for {ticker.upper()}")
     quote = quotes.get(conn, [ticker.upper()]).get(ticker.upper())
     points, meta = series.apply_quote(points, meta, quote)
     return {"points": points, **meta}
+
+
+@app.get("/api/refresh")
+def api_refresh():
+    """What the startup refresh is doing, or did last, and how fresh the data is."""
+    _fresh_cache["at"] = 0.0                 # reflect a just-finished run immediately
+    return {"refresh": refresh.status(), "freshness": data_freshness()}
 
 
 @app.get("/api/quote")
