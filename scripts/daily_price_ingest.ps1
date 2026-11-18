@@ -1,3 +1,7 @@
+# SUPERSEDED 2026-11-17 by daily_refresh.ps1 (task us-screener-daily-refresh).
+# Kept for manual EODHD pulls only; its scheduled task never actually ran
+# after 2026-09-22 -- see daily_refresh.ps1's header for why.
+#
 # Daily EODHD price-ingest job. Spends the free-tier 20 requests/day quota
 # on ingested companies that don't have price data yet, then recomputes the
 # market-mood gauge now that new prices have landed.

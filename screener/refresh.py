@@ -85,9 +85,13 @@ def period_for_gap(days):
 
 
 def _price_tickers(conn):
+    # EXISTS, not `cik IN (SELECT cik FROM facts)`: the IN form scans the
+    # whole facts index (millions of rows, a 2 GB+ file), which took minutes
+    # under Task Scheduler's low I/O priority and stalled the nightly job.
+    # EXISTS is one idx_facts_cik probe per company.
     return [r[0] for r in conn.execute(
-        "SELECT DISTINCT ticker FROM companies WHERE ticker IS NOT NULL "
-        "AND cik IN (SELECT cik FROM facts) ORDER BY ticker")]
+        "SELECT DISTINCT ticker FROM companies c WHERE ticker IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM facts f WHERE f.cik = c.cik) ORDER BY ticker")]
 
 
 def _rebased(conn, rows):
