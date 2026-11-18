@@ -126,5 +126,18 @@
     });
   });
 
+  // Export CSV: same query the results table would run, read from the form
+  // at click time (not a static link) so it always matches what's on
+  // screen, range grid or Advanced text alike.
+  var exportBtn = document.querySelector("[data-export-csv]");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", function () {
+      sync();
+      var form = qInput.closest("form");
+      var params = new URLSearchParams(new FormData(form));
+      window.location.href = "/results.csv?" + params.toString();
+    });
+  }
+
   sync();
 })();

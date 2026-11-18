@@ -98,17 +98,46 @@ def test_short_history_stays_daily_on_max():
 
 
 def test_short_range_falls_back_rather_than_drawing_nothing():
-    """Fixture prices are weekly, so a 1-month window can contain <2 points.
+    """A ticker with only one bar of real history can't fill any window.
 
     An empty chart box looks broken. Falling back to the full history is the
     honest degradation — and the response must admit it was a fallback.
+
+    (This used to be tested by asking for MODT's "1m" range as of a `today`
+    years past its last fixture price, relying on a stale-vs-today mismatch
+    to starve the window. That was actually exercising the bug reported
+    live — a stale-but-otherwise-healthy ticker falling back to its ENTIRE
+    history instead of its most recent real data — which series.fetch now
+    handles by re-anchoring to the ticker's own latest date first. A
+    genuinely sparse ticker, below, is the real case this fallback exists
+    for.)
     """
     _, conn = setup()
-    pts, meta = series.fetch(conn, "MODT", "1m", today=date(2030, 1, 1))
-    assert len(pts) >= 2, "sparse range should fall back to full history"
+    conn.execute(
+        "INSERT INTO prices (ticker, date, close) VALUES (?,?,?)",
+        ("SPARSE1", "2025-06-30", 10.0))
+    conn.commit()
+    pts, meta = series.fetch(conn, "SPARSE1", "1m", today=date(2025, 7, 15))
+    assert len(pts) >= 1, "sparse range should fall back to full history"
     assert meta["fell_back"] is True
     assert meta["partial"] is True
+    conn.execute("DELETE FROM prices WHERE ticker = 'SPARSE1'")
+    conn.commit()
     print("  OK  sparse range falls back instead of rendering an empty chart")
+
+
+def test_stale_ticker_gets_a_tight_window_not_full_history():
+    """The bug reported live: a ticker that HAS plenty of history but whose
+    price ingest hasn't run in a few days must still get the tight window it
+    asked for, re-anchored to its own latest date — not a dump of its entire
+    history just because wall-clock `today` has moved past the last bar."""
+    _, conn = setup()
+    pts, meta = series.fetch(conn, "MODT", "1m", today=date(2025, 7, 15))
+    assert meta["fell_back"] is False, meta
+    assert meta["span_days"] <= 35, meta
+    assert len(pts) >= 2
+    print(f"  OK  MODT '1m' with stale-but-recent data stays tight "
+          f"({meta['span_days']} days), not the full {meta['full_span_days']}-day history")
 
 
 def test_apply_quote_tips_last_point():
@@ -195,9 +224,14 @@ def test_price_chart_comes_before_the_ratios():
     for sid in ("financials", "ratios", "balance", "provenance"):
         assert chart_at < html.index(f'<section id="{sid}"'), \
             f"price chart must precede the {sid} section"
-    # The at-a-glance rail is the one thing allowed above the chart.
-    assert html.index('class="keystat"') < chart_at
-    print("  OK  key stats then chart, then financials, ratios and balance sheet")
+    # Section index, then the at-a-glance rail directly on the chart.
+    nav_at = html.index('class="subnav"')
+    rail_at = html.index('class="keystats"')
+    assert nav_at < rail_at < chart_at, "order must be: section index, key stats, chart"
+    between = html[rail_at:chart_at]
+    assert "<nav" not in between and "<section" not in between.replace('<section id="chart"', ""), (
+        "nothing may sit between the key stats and the chart")
+    print("  OK  section index, key stats, chart, then financials, ratios and balance sheet")
 
 
 def test_company_header_shows_price_and_source():
@@ -205,11 +239,95 @@ def test_company_header_shows_price_and_source():
     html = c.get("/stocks/MODT").text
     assert "At close" in html, "price source label missing from header"
     assert "data-chart-legend" in html and "data-chart-canvas" in html
-    for r in ("5d", "1m", "6m", "1y", "5y", "max"):
+    for r in ("1d", "5d", "1m", "6m", "ytd", "1y", "5y", "max"):
         assert f'data-range="{r}"' in html, f"range {r} missing"
     assert 'data-range="1y"\n                aria-pressed="true"' in html or \
            'aria-pressed="true"' in html, "no default range selected"
-    print("  OK  header shows price + label, all 6 ranges present")
+    print("  OK  header shows price + label, all 8 ranges present")
+
+
+def _with_intraday(fake, fn):
+    """Run fn with intraday.fetch replaced by `fake`, always restoring it."""
+    from screener import intraday
+    original = intraday.fetch
+    intraday.fetch = fake
+    try:
+        return fn()
+    finally:
+        intraday.fetch = original
+
+
+def _session(day, start_price=100.0):
+    """78 five-minute bars, 09:30..15:55."""
+    out = []
+    price = start_price
+    for i in range(78):
+        mins = 9 * 60 + 30 + i * 5
+        out.append([f"{day}T{mins // 60:02d}:{mins % 60:02d}", price])
+        price += 0.1
+    return out
+
+
+def test_one_day_range_uses_intraday_bars_and_previous_close():
+    c, conn = setup()
+    last_bar = conn.execute(
+        "SELECT MAX(date) FROM prices WHERE ticker='MODT'").fetchone()[0]
+    session_day = "2030-01-02"
+    prev_close = conn.execute(
+        "SELECT close FROM prices WHERE ticker='MODT' AND date < ? "
+        "ORDER BY date DESC LIMIT 1", (session_day,)).fetchone()[0]
+    d = _with_intraday(lambda t, r: _session(session_day, 100.0),
+                       lambda: c.get("/api/chart/MODT?range=1d").json())
+    assert d["intraday"] is True and d["range"] == "1d"
+    assert len(d["points"]) == 78 and d["points"][0][0] == f"{session_day}T09:30"
+    assert d["prev_close"] == prev_close and d["baseline"] == prev_close, (
+        "the day's move must be measured from the previous close, not the first bar")
+    assert abs(d["change"] - (d["last"] - prev_close)) < 1e-9
+    assert d["available_ranges"]["1d"] is True
+    assert last_bar < session_day
+    print(f"  OK  1D: {len(d['points'])} intraday bars, change measured from previous close {prev_close}")
+
+
+def test_one_day_range_503s_when_intraday_is_unavailable():
+    """No end-of-day stand-in exists for a single day, so say so honestly
+    instead of drawing a made-up or stale chart."""
+    c, _ = setup()
+    r = _with_intraday(lambda t, rng: None, lambda: c.get("/api/chart/MODT?range=1d"))
+    assert r.status_code == 503, r.status_code
+    print("  OK  1D with no intraday data answers 503, not a fake chart")
+
+
+def test_five_day_range_falls_back_to_five_daily_closes():
+    c, conn = setup()
+    # The fixture's MODT is weekly, so give this test a ticker with daily bars.
+    conn.executemany(
+        "INSERT INTO prices (ticker, date, close) VALUES (?,?,?)",
+        [("DAILY1", f"2025-06-{day:02d}", 10.0 + day) for day in range(2, 28)
+         if date(2025, 6, day).weekday() < 5])
+    conn.commit()
+    try:
+        d = _with_intraday(lambda t, rng: None,
+                           lambda: c.get("/api/chart/DAILY1?range=5d").json())
+    finally:
+        conn.execute("DELETE FROM prices WHERE ticker = 'DAILY1'")
+        conn.commit()
+    assert d.get("intraday") is not True
+    assert len(d["points"]) == 5, f"5D must be five trading days, got {len(d['points'])}"
+    assert d["partial"] is False, "5 bars for a 5-day range is not 'all available'"
+    print("  OK  5D without intraday data falls back to exactly five daily closes")
+
+
+def test_intraday_ranges_404_for_unknown_ticker_without_hitting_the_network():
+    c, _ = setup()
+    called = []
+
+    def spy(t, r):
+        called.append(t)
+        return None
+    r = _with_intraday(spy, lambda: c.get("/api/chart/NOSUCHTICKER?range=1d"))
+    assert r.status_code == 404, r.status_code
+    assert not called, "an unknown ticker must not trigger a yfinance call"
+    print("  OK  unknown ticker -> 404 before any intraday fetch")
 
 
 def test_chart_script_only_on_company_pages():

@@ -198,6 +198,8 @@ def normalize_company(conn, cik, as_of=None, table="fundamentals"):
             elif metric in SPLIT_ADJUSTED_SHARE_COUNT:
                 val = val * splits_mod.factor_after(split_events, filed)
         rows.append((cik, metric, pend, ptype, val, concept, derived, filed))
+    if table == "fundamentals":
+        rows.extend(_derive_q4_per_share(cik, rows, fy_windows))
     if rows:
         # table is chosen by us, never by user input -- guard anyway.
         assert table in ("fundamentals", "fundamentals_pit"), table
@@ -208,6 +210,39 @@ def normalize_company(conn, cik, as_of=None, table="fundamentals"):
             rows,
         )
     return len(rows)
+
+
+def _derive_q4_per_share(cik, rows, fy_windows):
+    """Q4 EPS = FY EPS - (Q1 + Q2 + Q3), on split-adjusted values.
+
+    Without this, EPS has no fourth quarter anywhere, so the trailing-four-
+    quarter sum can never be formed and `ttm()` silently falls back to the
+    last fiscal year's EPS -- up to three quarters old. That made every P/E
+    on the site lag by a quarter or more (NVDA showed EPS 4.90 against a real
+    trailing 6.53). The result equals the usual "last FY + this year's YTD -
+    last year's YTD" definition.
+
+    Weighted-average share counts differ slightly from period to period, so
+    this is an approximation, which is why EPS stays out of the YTD
+    differencing above and the row is flagged derived. It is only done on the
+    current view, where split adjustment has already put every period on one
+    share basis; a point-in-time vintage keeps exactly what was on file, and
+    subtracting figures from different sides of a split there would invent
+    numbers.
+    """
+    have = {(m, pe, pt): (val, concept) for (_c, m, pe, pt, val, concept, _d, _f) in rows}
+    derived = []
+    for fy_start, fy_end, fy_filed in fy_windows:
+        for metric in SPLIT_ADJUSTED_PER_SHARE:
+            fy = have.get((metric, fy_end, "FY"))
+            if fy is None or fy[0] is None or (metric, fy_end, "Q") in have:
+                continue
+            qs = [v[0] for (m, pe, pt), v in have.items()
+                  if m == metric and pt == "Q" and fy_start <= pe < fy_end
+                  and v[0] is not None]
+            if len(qs) == 3:
+                derived.append((cik, metric, fy_end, "Q", fy[0] - sum(qs), fy[1], 1, fy_filed))
+    return derived
 
 
 def normalize_all(conn, ciks=None, as_of=None, table="fundamentals"):

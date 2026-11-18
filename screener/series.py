@@ -16,21 +16,26 @@ a lie dressed as a chart.
 
 from datetime import date, timedelta
 
+from . import intraday
+
 # range key -> (days back or None for everything, preferred bucket)
 #
-# No "1d" -- prices are end-of-day only (no intraday data), so a single
-# calendar day is at most one point. That's not a chart, and faking one would
-# violate the "no fake data" rule the rest of this app follows. "5d" is the
-# shortest range that's honestly drawable.
+# "1d" is not here: stored prices are end-of-day only, so a single day is at
+# most one point. 1D and 5D are drawn from intraday bars instead (see
+# fetch_intraday); the "5d" entry below is only the end-of-day fallback for
+# when those aren't available, trimmed to the last five trading bars.
+# "ytd" ignores its days value: the window starts at last year's final close.
 RANGES = {
     "5d":  (10,    "day"),
     "1m":  (31,    "day"),
     "6m":  (183,   "day"),
+    "ytd": (366,   "day"),
     "1y":  (366,   "day"),
     "5y":  (1827,  "week"),
     "max": (None,  "month"),
 }
 DEFAULT_RANGE = "1y"
+INTRADAY_RANGES = ("1d", "5d")
 
 # Spans below these keep denser buckets even when the button asked for coarser.
 _SPAN_DAY_MAX = 400          # ≤ ~13 months → always daily
@@ -96,13 +101,81 @@ def available_ranges(span_days):
     redrawn under a different label.
     """
     return {
+        "1d": intraday.available(),
         "5d": True,
         "1m": True,
         "6m": span_days >= 45,
+        "ytd": True,
         "1y": span_days >= 90,
         "5y": span_days >= _SPAN_DAY_MAX,
         "max": True,
     }
+
+
+def _cutoff(range_key, anchor):
+    """First date of a windowed range, counted back from `anchor`."""
+    if range_key == "ytd":
+        return date(anchor.year - 1, 12, 31)
+    return anchor - timedelta(days=RANGES[range_key][0])
+
+
+def _full_span(conn, ticker):
+    full = conn.execute(
+        "SELECT MIN(date), MAX(date) FROM prices "
+        "WHERE ticker = ? AND close IS NOT NULL", (ticker.upper(),)
+    ).fetchone()
+    if full and full[0] and full[1]:
+        return (date.fromisoformat(full[1]) - date.fromisoformat(full[0])).days
+    return None
+
+
+def fetch_intraday(conn, ticker, range_key):
+    """(points, meta) for 1D / 5D drawn from intraday bars, or None when
+    those aren't available (yfinance missing, network down, market data
+    empty). The caller decides how to degrade -- nothing is invented here.
+
+    Points are [["YYYY-MM-DDTHH:MM", close], ...] in exchange-local time.
+    Change is measured against the last stored close *before* the first
+    session shown (the "previous close"), like every other quote page does,
+    not against the first bar of the window.
+    """
+    pts = intraday.fetch(ticker, range_key)
+    if not pts or len(pts) < 2:
+        return None
+
+    first_day = pts[0][0][:10]
+    row = conn.execute(
+        "SELECT close FROM prices WHERE ticker = ? AND close IS NOT NULL "
+        "AND date < ? ORDER BY date DESC LIMIT 1",
+        (ticker.upper(), first_day)).fetchone()
+    baseline = row[0] if row else pts[0][1]
+
+    first, last = pts[0][1], pts[-1][1]
+    full_span = _full_span(conn, ticker) or 0
+    meta = {
+        "ticker": ticker.upper(),
+        "range": range_key,
+        "bucket": "intraday",
+        "count": len(pts),
+        "span_days": (date.fromisoformat(pts[-1][0][:10])
+                      - date.fromisoformat(first_day)).days,
+        "full_span_days": full_span,
+        "partial": False,
+        "fell_back": False,
+        "intraday": True,
+        "available_ranges": available_ranges(full_span),
+        "quote_label": "Intraday, may be delayed",
+        "quote_source": "intraday",
+        "baseline": baseline,
+        "prev_close": baseline if range_key == "1d" else None,
+        "first": first, "last": last,
+        "first_date": pts[0][0], "last_date": pts[-1][0],
+        "change": last - baseline,
+        "change_pct": ((last / baseline - 1) * 100.0) if baseline else None,
+        "low": min(p[1] for p in pts),
+        "high": max(p[1] for p in pts),
+    }
+    return pts, meta
 
 
 def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
@@ -120,7 +193,7 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
            "WHERE ticker = ? AND close IS NOT NULL")
     params = [ticker.upper()]
     if days is not None:
-        cutoff = as_of - timedelta(days=days)
+        cutoff = _cutoff(range_key, as_of)
         sql += " AND date >= ?"
         params.append(cutoff.isoformat())
     sql += " ORDER BY date ASC"
@@ -129,22 +202,44 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
     fell_back = False
 
     # A short range on a sparse history can return one point or none, which
-    # draws nothing. Fall back to everything we have rather than an empty box.
+    # draws nothing. Two different causes need two different responses:
+    #   stale  the ticker has plenty of history, it just hasn't been priced
+    #          in the last few days (the daily ingest doesn't always run) --
+    #          a window anchored to wall-clock `today` then asks for days
+    #          nobody has yet. Re-anchor the SAME window to the ticker's own
+    #          latest stored date instead of giving up on it.
+    #   sparse the ticker genuinely doesn't have much history at all. Only
+    #          now fall back to everything we hold, rather than an empty box.
+    # Anchoring to wall-clock `today` instead of the latest stored date used
+    # to be harmless when "everything" meant a handful of rows for a thin
+    # ticker -- it's not harmless once a ticker has 40+ years of history: a
+    # few stale days turned "5d" into "max" for every ticker whose price
+    # ingest hadn't run that day.
     if len(rows) < 2 and days is not None:
-        rows = [(r[0], r[1]) for r in conn.execute(
-            "SELECT date, close FROM prices WHERE ticker = ? "
-            "AND close IS NOT NULL ORDER BY date ASC", (ticker.upper(),))]
-        fell_back = True
+        latest = conn.execute(
+            "SELECT MAX(date) FROM prices WHERE ticker = ? AND close IS NOT NULL",
+            (ticker.upper(),)
+        ).fetchone()[0]
+        if latest and latest < as_of.isoformat():
+            cutoff = _cutoff(range_key, date.fromisoformat(latest))
+            rows = [(r[0], r[1]) for r in conn.execute(
+                "SELECT date, close FROM prices WHERE ticker = ? AND close IS NOT NULL "
+                "AND date >= ? ORDER BY date ASC", (ticker.upper(), cutoff.isoformat()))]
+        if len(rows) < 2:
+            rows = [(r[0], r[1]) for r in conn.execute(
+                "SELECT date, close FROM prices WHERE ticker = ? "
+                "AND close IS NOT NULL ORDER BY date ASC", (ticker.upper(),))]
+            fell_back = True
+
+    # The 10-day window above is only there to find the latest bars; "5D"
+    # means five trading days, not whatever fits in ten calendar ones.
+    if range_key == "5d" and not fell_back:
+        rows = rows[-5:]
 
     # Full-history span drives which tabs are honest, even when this request
     # asked for a windowed slice.
-    full = conn.execute(
-        "SELECT MIN(date), MAX(date) FROM prices "
-        "WHERE ticker = ? AND close IS NOT NULL", (ticker.upper(),)
-    ).fetchone()
-    if full and full[0] and full[1]:
-        full_span = (date.fromisoformat(full[1]) - date.fromisoformat(full[0])).days
-    else:
+    full_span = _full_span(conn, ticker)
+    if full_span is None:
         full_span = _span_days(rows)
 
     span = _span_days(rows)
@@ -155,7 +250,9 @@ def fetch(conn, ticker, range_key=DEFAULT_RANGE, today=None):
     # or we had to abandon the window entirely to draw anything.
     # MAX with no day-cutoff still counts as partial when full history is
     # shorter than what "MAX" implies to a reader (~5y+ of prices).
-    requested_days = days if days is not None else None
+    requested_days = None
+    if days is not None and range_key != "5d":
+        requested_days = (as_of - _cutoff(range_key, as_of)).days
     partial = fell_back or (
         requested_days is not None and span > 0 and span < requested_days * 0.85
     )

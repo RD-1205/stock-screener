@@ -278,6 +278,16 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 );
 
 
+-- When each company's SEC filing list was last checked for new reports
+-- (screener/refresh.py). Also created on demand there, because existing
+-- databases never re-run this file.
+CREATE TABLE IF NOT EXISTS filing_check (
+    cik         INTEGER PRIMARY KEY,
+    checked_at  TEXT NOT NULL,
+    new_filings INTEGER NOT NULL DEFAULT 0
+);
+
+
 -- ---------------------------------------------------------------
 -- 7. Index membership.
 --

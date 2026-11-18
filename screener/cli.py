@@ -18,7 +18,8 @@ import os
 import sys
 from datetime import date
 
-from . import db, edgar, ingest, news, picker, prices, screen, sentiment, splits, transform
+from . import (db, edgar, ingest, news, picker, prices, refresh, screen, sentiment,
+               splits, transform)
 
 
 def _load_dotenv():
@@ -89,7 +90,16 @@ def cmd_ingest(args):
         q += f" AND ticker IN ({','.join('?' * len(wanted))})"
         params = wanted
     elif not args.refresh:
-        q += " AND cik NOT IN (SELECT cik FROM ingest_log WHERE status='ok')"
+        # 'empty' means we already tried and confirmed there's genuinely no
+        # XBRL to find -- a closed-end fund filing N-CSR, a foreign ADR on
+        # 20-F/6-K, a utility subsidiary whose facts live under its parent's
+        # CIK. Retrying it returns empty again, forever. Found the hard way:
+        # --limit 20 kept re-selecting the same 45 already-confirmed-empty,
+        # lowest-CIK companies every single run and never making progress.
+        # 'error' (a transient fetch failure) is NOT excluded here, so it's
+        # still retried automatically -- only a confirmed non-result should
+        # stop being retried without --refresh asking for it explicitly.
+        q += " AND cik NOT IN (SELECT cik FROM ingest_log WHERE status IN ('ok','empty'))"
     q += " ORDER BY cik"
     if args.limit and not args.tickers:
         q += f" LIMIT {int(args.limit)}"
@@ -142,16 +152,53 @@ def cmd_prices(args):
             q += f" LIMIT {int(args.limit)}"
         tickers = [r[0] for r in conn.execute(q, params)]
 
-    fetch = prices.fetch_eodhd if args.provider == "eodhd" else prices.fetch_stooq
     total = 0
-    for i, t in enumerate(tickers, 1):
-        try:
-            total += prices.store(conn, fetch(t))
-        except Exception as e:                  # noqa: BLE001
-            print(f"  ! {t}: {e}")
-        if i % 25 == 0:
-            print(f"  {i}/{len(tickers)}  {total:,} bars")
+    if args.provider == "yfinance":
+        # One batched call beats one-request-per-ticker by roughly 30x in
+        # practice (all 805 of this project's own tickers, 5y each, in
+        # ~25s) -- see screener/prices.py's module docstring for the
+        # measurement this is based on. Store as each chunk completes
+        # (on_chunk), not after the whole run -- a full-universe backfill
+        # can run long enough that losing 100% of the progress to a crash
+        # 90% of the way through would be a real cost, not just an
+        # inconvenience.
+        seen = set()
+
+        def _store_chunk(chunk_result):
+            nonlocal total
+            for t, rows in chunk_result.items():
+                seen.add(t)
+                total += prices.store(conn, rows)
+
+        prices.fetch_yfinance_batch(
+            tickers, on_chunk=_store_chunk,
+            progress=lambda done, n: print(f"  fetched {done}/{n}  {total:,} bars so far"))
+        for t in tickers:
+            if t not in seen:
+                print(f"  ! {t}: no data returned")
+    else:
+        fetch = prices.fetch_eodhd if args.provider == "eodhd" else prices.fetch_stooq
+        for i, t in enumerate(tickers, 1):
+            try:
+                total += prices.store(conn, fetch(t))
+            except Exception as e:              # noqa: BLE001
+                print(f"  ! {t}: {e}")
+            if i % 25 == 0:
+                print(f"  {i}/{len(tickers)}  {total:,} bars")
     print(f"{total:,} price bars")
+
+    # Market cap, P/E, P/B and P/S are price times (or over) a fundamental, and
+    # live in `snapshot`, so new prices are not visible anywhere until it is
+    # rebuilt. Do it here rather than relying on someone remembering.
+    if total:
+        print(f"snapshot rebuilt for {transform.build_snapshot(conn):,} companies")
+
+
+def cmd_refresh(args):
+    """The same run the web app does at startup (see screener/refresh.py)."""
+    result = refresh.run(db_path=args.db, ua=os.environ.get("SEC_USER_AGENT"), log=print)
+    if any(s["state"] == "error" for s in result["steps"]):
+        sys.exit(1)
 
 
 def cmd_splits(args):
@@ -325,7 +372,7 @@ def main(argv=None):
     g = sub.add_parser("prices")
     g.add_argument("--limit", type=int)
     g.add_argument("--tickers", help="comma-separated tickers, e.g. AAPL,MSFT (overrides --limit)")
-    g.add_argument("--provider", choices=["stooq", "eodhd"], default="stooq")
+    g.add_argument("--provider", choices=["stooq", "eodhd", "yfinance"], default="stooq")
     g.add_argument("--only-ingested", action="store_true", default=True)
     g.add_argument("--unpriced", action="store_true",
                     help="only tickers with no prices yet, ranked by size and "
@@ -342,6 +389,9 @@ def main(argv=None):
     sub.add_parser("snapshot").set_defaults(func=cmd_snapshot)
     sub.add_parser("sentiment", help="compute + store today's market mood reading") \
        .set_defaults(func=cmd_sentiment)
+    sub.add_parser("refresh", help="prices, gauge, new SEC filings, metrics -- what the "
+                                   "web app does at startup") \
+       .set_defaults(func=cmd_refresh)
 
     g = sub.add_parser("history", help="build point-in-time vintages")
     g.add_argument("--since", default="2015-01-01")

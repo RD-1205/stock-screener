@@ -13,10 +13,12 @@ Run:  python -m screener.cli serve
 Docs: http://127.0.0.1:8000/api/docs
 """
 
+import contextlib
 import html
 import math
 import os
 import sys
+import threading
 import time
 from datetime import date
 from urllib.parse import quote_plus
@@ -29,8 +31,8 @@ from fastapi.templating import Jinja2Templates
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from screener import (analysis, browse, db, news, quotes, screen, sentiment,  # noqa: E402
-                      series, transform)
+from screener import (analysis, browse, db, news, quotes, refresh, screen,  # noqa: E402
+                      sentiment, series, transform)
 from screener.concepts import METRICS                        # noqa: E402
 from web.content import legal                                # noqa: E402
 
@@ -69,11 +71,33 @@ templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 SITE_NAME = os.environ.get("SITE_NAME", "us-screener")
 SITE_URL = os.environ.get("SITE_URL", "http://127.0.0.1:8000").rstrip("/")
 
+@contextlib.asynccontextmanager
+async def lifespan(_app):
+    """Bring everything up to date every time the platform starts: latest
+    prices, the market-mood gauge, any SEC filings we haven't ingested, and
+    the metrics derived from all of it (see screener/refresh.py for the
+    steps and their order).
+
+    Runs in a background thread so the site is up immediately; until a step
+    lands, pages show the last stored figures, and the footer says an update
+    is in progress. SCREENER_AUTO_REFRESH=0 turns it off (offline work).
+    Nothing in the refresh can stop the site from starting."""
+    _app.state.refresh_thread = None
+    if os.environ.get("SCREENER_AUTO_REFRESH", "1") != "0":
+        _app.state.refresh_thread = threading.Thread(
+            target=refresh.run, name="refresh", daemon=True,
+            kwargs=dict(db_path=os.environ.get("SCREENER_DB", "screener.db"),
+                        ua=os.environ.get("SEC_USER_AGENT"), log=print))
+        _app.state.refresh_thread.start()
+    yield
+
+
 app = FastAPI(
     title="us-screener",
     description="US equity fundamentals screener on free SEC EDGAR XBRL data.",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 class RevalidatingStaticFiles(StaticFiles):
     """Force a conditional GET on every static-asset request.
@@ -308,10 +332,46 @@ def tape_items():
     return items
 
 
+_fresh_cache = {"at": 0.0, "value": None}
+FRESHNESS_TTL = 30
+
+
+def data_freshness():
+    """How current the data on screen is, for the footer and /api/refresh.
+
+    Prices are read for one large, always-priced ticker rather than
+    MAX(date) over the whole table, which is millions of rows.
+    """
+    now = time.monotonic()
+    cached = _fresh_cache["value"]
+    run = refresh.status()
+    if cached and now - _fresh_cache["at"] < FRESHNESS_TTL:
+        return {**cached, "running": run["state"] == "running", "step": run["step"]}
+
+    value = {"prices_through": None, "filings_checked": None}
+    try:
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT MAX(p.date) FROM prices p WHERE p.ticker = "
+            "(SELECT ticker FROM snapshot WHERE ticker IS NOT NULL "
+            "ORDER BY market_cap DESC LIMIT 1)").fetchone()
+        value["prices_through"] = row[0] if row else None
+    except Exception:                                       # noqa: BLE001
+        pass
+    try:
+        row = get_conn().execute("SELECT MAX(checked_at) FROM filing_check").fetchone()
+        value["filings_checked"] = row[0] if row else None
+    except Exception:                                       # table not created yet
+        pass
+    _fresh_cache.update(at=now, value=value)
+    return {**value, "running": run["state"] == "running", "step": run["step"]}
+
+
 templates.env.globals.update(
     site_name=SITE_NAME,
     site_url=SITE_URL,
     nav_items=NAV,
+    data_freshness=data_freshness,
     footer_tickers=footer_tickers,
     tape_items=tape_items,
     tape_label=quotes.label,
@@ -414,6 +474,37 @@ def results(request: Request,
         "rows": rows, "error": error, "cols": TABLE_COLS,
         "q": q, "as_of": as_of, "order": order, "dir": dir, "limit": limit,
     })
+
+
+@app.get("/results.csv")
+def results_csv(q: str = "", as_of: str = "", order: str = "market_cap",
+                dir: str = "desc", limit: int = 2000):
+    """Export the current screen as CSV -- the single most-requested
+    feature on screener.in, and cheap: same query engine, same columns as
+    the results table, no accounts needed. Capped well above what anyone
+    screens for by hand, so one URL can't be used to walk the whole
+    snapshot table in a single request."""
+    import csv
+    import io
+
+    conn = get_conn()
+    limit = max(1, min(limit, 5000))
+    try:
+        rows = run_screen(conn, q, as_of, order, dir, limit)
+    except screen.QueryError as e:
+        raise HTTPException(400, str(e))
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([label for _col, label, _kind in TABLE_COLS])
+    for r in rows:
+        writer.writerow([r[col] for col, _label, _kind in TABLE_COLS])
+
+    filename = f"us-screener-{as_of or date.today().isoformat()}.csv"
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/company/{ticker}")
@@ -844,14 +935,35 @@ def api_chart(ticker: str, range: str = series.DEFAULT_RANGE):
 
     When Finnhub is configured, the last point is tipped to the delayed quote
     so the chart end matches the company header.
+
+    1D and 5D come from intraday bars (points are ["YYYY-MM-DDTHH:MM", close]).
+    If those can't be had, 1D answers 503 -- there is no honest end-of-day
+    stand-in for a single day -- while 5D falls back to the last five daily
+    closes.
     """
     conn = get_conn()
+    if range in series.INTRADAY_RANGES:
+        if not conn.execute("SELECT 1 FROM prices WHERE ticker = ? LIMIT 1",
+                            (ticker.upper(),)).fetchone():
+            raise HTTPException(404, f"No price history for {ticker.upper()}")
+        got = series.fetch_intraday(conn, ticker, range)
+        if got:
+            return {"points": got[0], **got[1]}
+        if range == "1d":
+            raise HTTPException(503, "Intraday prices are unavailable right now")
     points, meta = series.fetch(conn, ticker, range)
     if not points:
         raise HTTPException(404, f"No price history for {ticker.upper()}")
     quote = quotes.get(conn, [ticker.upper()]).get(ticker.upper())
     points, meta = series.apply_quote(points, meta, quote)
     return {"points": points, **meta}
+
+
+@app.get("/api/refresh")
+def api_refresh():
+    """What the startup refresh is doing, or did last, and how fresh the data is."""
+    _fresh_cache["at"] = 0.0                 # reflect a just-finished run immediately
+    return {"refresh": refresh.status(), "freshness": data_freshness()}
 
 
 @app.get("/api/quote")
@@ -909,8 +1021,15 @@ def annual_history(conn, cik, limit_years=10):
     return [(y, {m: by_year[y].get(m) for m in HISTORY_METRICS}) for y in years]
 
 
-def bar_chart(pairs, width=560, height=140):
-    """Server-rendered SVG. No JS, no chart library, no CDN -- it just works."""
+def bar_chart(pairs, width=560, height=160):
+    """Server-rendered SVG. No JS-required-to-render, no chart library, no
+    CDN -- every value is a real text label baked into the markup, visible
+    with zero interaction. A small amount of JS (app.js) additionally makes
+    each bar clickable/tappable/focusable, showing the exact underlying
+    number (no B/M/K rounding) in a caption the template renders alongside
+    this -- same interaction pattern as the mood gauge's zone bands, so a
+    hover/press/keyboard-focus habit learned on one chart works on both.
+    """
     pairs = [(y, v) for y, v in pairs if v is not None]
     if not pairs:
         return ""
@@ -920,12 +1039,17 @@ def bar_chart(pairs, width=560, height=140):
     gap = width / max(n, 1)
     bars = []
     for i, (year, val) in enumerate(pairs):
-        h = max(2.0, (val / top) * (height - 28))
+        h = max(2.0, (val / top) * (height - 46))
         x = i * gap + (gap - bw) / 2
         y = height - h - 16
+        label = fmt_money(val)
+        exact = f"{val:,.0f}"
         bars.append(
             f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{h:.1f}" '
-            f'rx="2" class="bar"><title>{year}: {fmt_money(val)}</title></rect>'
+            f'rx="2" class="bar chart-bar" tabindex="0" '
+            f'data-label="{year}" data-value="{label}" data-exact="{exact}">'
+            f'<title>{year}: {label} ({exact})</title></rect>'
+            f'<text x="{x + bw/2:.1f}" y="{max(y - 6, 11):.1f}" class="val-lbl">{label}</text>'
             f'<text x="{x + bw/2:.1f}" y="{height - 3}" class="lbl">{year}</text>'
         )
     return (f'<svg viewBox="0 0 {width} {height}" class="chart" '

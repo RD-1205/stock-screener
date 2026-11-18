@@ -89,6 +89,46 @@
     });
   })();
 
+  // ---- bar charts: hover/tap/focus a bar for the exact figure -----------
+  // Every value already renders as a real label with zero JS (bar_chart()
+  // in web/app.py bakes it into the SVG), so this only adds the second
+  // layer: click/tap/keyboard-focus a bar to show the EXACT underlying
+  // number (no B/M/K rounding) in the caption paragraph that follows the
+  // chart in its own panel. Same interaction shape as the mood gauge above
+  // on purpose -- one habit, every chart on the site. Works for any future
+  // bar_chart() output automatically; nothing here is specific to revenue.
+  document.querySelectorAll(".chart").forEach(function (svg) {
+    var panel = svg.closest(".panel") || svg.parentElement;
+    var caption = panel && panel.querySelector("[data-chart-caption]");
+    if (!caption) return;
+    var bars = svg.querySelectorAll(".chart-bar");
+    if (!bars.length) return;
+    var defaultText = caption.textContent.trim();
+
+    function show(bar) {
+      bars.forEach(function (b) { b.classList.toggle("is-active", b === bar); });
+      caption.textContent = "";
+      var strong = document.createElement("strong");
+      strong.textContent = bar.dataset.label + " (" + bar.dataset.value + ")";
+      caption.append(strong, ": " + bar.dataset.exact + " exact");
+    }
+
+    function reset() {
+      bars.forEach(function (b) { b.classList.remove("is-active"); });
+      caption.textContent = defaultText;
+    }
+
+    bars.forEach(function (bar) {
+      bar.addEventListener("mouseenter", function () { show(bar); });
+      bar.addEventListener("focus", function () { show(bar); });
+      bar.addEventListener("mouseleave", reset);
+      bar.addEventListener("blur", reset);
+      bar.addEventListener("click", function () {
+        if (bar.classList.contains("is-active")) reset(); else show(bar);
+      });
+    });
+  });
+
   // ---- search palette placeholder --------------------------------------
   // Wired properly in build step 2 (R2). For now Cmd/Ctrl-K focuses the hero
   // search if it's on the page, otherwise navigates to /search. Shipping the

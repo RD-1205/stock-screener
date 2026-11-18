@@ -107,6 +107,69 @@ def test_ttm_matches_fiscal_year():
     print("  OK  TTM reconciles to FY for 3 companies")
 
 
+def test_q4_eps_is_derived_and_sums_to_the_fiscal_year():
+    conn, _ = build_db()
+    q4 = conn.execute(
+        "SELECT val, derived FROM fundamentals WHERE cik=100001 AND metric='eps_diluted' "
+        "AND period_type='Q' AND period_end='2024-12-31'").fetchone()
+    assert q4 is not None and q4["derived"] == 1, "Q4 EPS missing -- TTM EPS will lag a year"
+    quarters = sum(r["val"] for r in conn.execute(
+        "SELECT val FROM fundamentals WHERE cik=100001 AND metric='eps_diluted' "
+        "AND period_type='Q' AND period_end BETWEEN '2024-01-01' AND '2024-12-31'"))
+    fy = one(conn, "SELECT val FROM fundamentals WHERE cik=100001 AND metric='eps_diluted' "
+                   "AND period_type='FY' AND period_end='2024-12-31'")
+    assert abs(quarters - fy) < 1e-9, (quarters, fy)
+    print(f"  OK  Q4 EPS derived; the four quarters add back up to FY EPS {fy:.2f}")
+
+
+def _nvda_like_facts(conn):
+    """A fiscal year ending late January, as NVDA's does: FY EPS 4.90, three
+    reported quarters, then the first quarter of the next year (2.39)."""
+    eps = [
+        ("2025-01-27", "2026-01-25", 4.90, "10-K", "2026-02-25", "FY"),
+        ("2025-01-27", "2025-04-27", 0.76, "10-Q", "2025-05-28", "Q1"),
+        ("2025-04-28", "2025-07-27", 1.08, "10-Q", "2025-08-27", "Q2"),
+        ("2025-07-28", "2025-10-26", 1.30, "10-Q", "2025-11-19", "Q3"),
+        ("2026-01-26", "2026-04-26", 2.39, "10-Q", "2026-05-20", "Q1"),
+    ]
+    for i, (start, end, val, form, filed, fp) in enumerate(eps):
+        conn.execute(
+            "INSERT INTO facts (cik, taxonomy, concept, unit, period_start, period_end, "
+            "fy, fp, form, filed, accn, frame, val) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (7, "us-gaap", "EarningsPerShareDiluted", "USD/shares", start, end,
+             2026, fp, form, filed, f"0000000-26-{i:06d}", None, val))
+    conn.commit()
+
+
+def test_ttm_eps_uses_the_latest_quarter_not_the_last_fiscal_year():
+    """The reported bug: with no Q4 EPS the trailing sum never formed, so EPS
+    fell back to the last fiscal year (4.90) and P/E lagged by a quarter.
+    Last FY + this year's YTD - last year's YTD = 4.90 + 2.39 - 0.76."""
+    conn = db.connect(":memory:")
+    db.init(conn)
+    _nvda_like_facts(conn)
+    transform.normalize_company(conn, 7)
+    got = transform.ttm(conn, 7, "eps_diluted")
+    assert abs(got - 6.53) < 1e-9, f"TTM EPS {got}, expected 6.53 (not the stale FY 4.90)"
+    q4 = one(conn, "SELECT val FROM fundamentals WHERE cik=7 AND metric='eps_diluted' "
+                   "AND period_type='Q' AND period_end='2026-01-25'")
+    assert abs(q4 - 1.76) < 1e-9, q4
+    print(f"  OK  TTM EPS is {got:.2f} (derived Q4 {q4:.2f}), not last year's 4.90")
+
+
+def test_point_in_time_views_do_not_get_a_derived_q4_eps():
+    """A vintage must show what was on file. Splits aren't adjusted there, so
+    subtracting per-share figures across a split would invent numbers."""
+    conn = db.connect(":memory:")
+    db.init(conn)
+    _nvda_like_facts(conn)
+    transform.normalize_company(conn, 7, as_of="2026-06-30", table="fundamentals_pit")
+    n = one(conn, "SELECT COUNT(*) FROM fundamentals_pit WHERE cik=7 AND metric='eps_diluted' "
+                  "AND period_type='Q' AND derived=1")
+    assert n == 0, f"{n} derived EPS quarters leaked into a point-in-time table"
+    print("  OK  point-in-time vintages keep EPS exactly as filed (no derived Q4)")
+
+
 def test_ytd_cashflow_differenced():
     """Cash flow is filed YTD only; discrete quarters must be differenced out."""
     conn, _ = build_db()
