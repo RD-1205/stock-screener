@@ -64,5 +64,38 @@ $code = $LASTEXITCODE
 $summary = $output | Where-Object { $_ -match '^\s*(prices|snapshot|sentiment|filings|normalize)\b' -or $_ -match 'Traceback|Error' }
 Write-Log (($summary | Out-String).TrimEnd())
 Write-Log "refresh exit code: $code"
+
+# Publish docs/DATA-STATUS.md to main. This uses a separate clone at
+# %USERPROFILE%\.us-screener\repo (set up once with `git clone --branch main`
+# and repo-local user.name/user.email), never the OneDrive working checkout,
+# so whatever branch or uncommitted work is open there is never touched.
+# Only that one file is ever staged. Runs even when the refresh failed: the
+# status file then records the failure, which is the point of publishing it.
+$clone = Join-Path $env:USERPROFILE ".us-screener\repo"
+if (Test-Path (Join-Path $clone ".git")) {
+    $git = { param([string[]]$a) & git -C $clone @a 2>&1 | ForEach-Object { "$_" } }
+    $pull = & $git @("pull", "--ff-only", "--quiet", "origin", "main")
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log "status: pull failed, not committing: $(($pull | Out-String).Trim())"
+    } else {
+        $day = & $python scripts\data_status.py --db screener.db --log $log `
+            --out (Join-Path $clone "docs\DATA-STATUS.md") 2>&1 | Select-Object -Last 1
+        & $git @("add", "docs/DATA-STATUS.md") | Out-Null
+        & $git @("diff", "--cached", "--quiet") | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "status: unchanged, nothing to commit"
+        } else {
+            $msg = "Data status $(Get-Date -Format 'yyyy-MM-dd'): prices through $day"
+            if ($code -ne 0) { $msg += " (refresh failed, exit $code)" }
+            & $git @("commit", "--quiet", "-m", $msg) | Out-Null
+            $push = & $git @("push", "--quiet", "origin", "main")
+            if ($LASTEXITCODE -eq 0) { Write-Log "status: pushed -- $msg" }
+            else { Write-Log "status: push failed: $(($push | Out-String).Trim())" }
+        }
+    }
+} else {
+    Write-Log "status: no clone at $clone, skipped"
+}
+
 Write-Log ""
 exit $code
