@@ -1,36 +1,37 @@
 # Data status
 
-Written by the nightly refresh at 2026-11-24 16:51 (local time).
+Written by the nightly refresh at 2026-11-25 12:10 (local time).
 Prices are end-of-day from Yahoo Finance; fundamentals are SEC EDGAR XBRL.
 
 | | |
 |---|---|
-| Prices through | 2026-11-24 |
-| Tickers priced that day | 776 |
+| Prices through | 2026-11-25 |
+| Tickers priced that day | 769 |
 | Companies with fundamentals | 818 |
-| Market mood (2026-11-24) | 36 / 100, Fear (3 of 7 components) |
+| Market mood (2026-11-25) | 30 / 100, Fear (3 of 7 components) |
 
-## Biggest moves on 2026-11-24
+## Biggest moves on 2026-11-25
 
 Companies with market cap of $2B or more, close vs the previous close.
 
 | Ticker | Company | Close | Change |
 |---|---|--:|--:|
-| CLDX | Celldex Therapeutics, Inc. | 31.23 | +7.7% |
-| TEX | TEREX CORP | 58.49 | +7.3% |
-| M | Macy's, Inc. | 24.48 | +6.3% |
-| NKE | NIKE, Inc. | 35.75 | +5.9% |
-| CRK | COMSTOCK RESOURCES INC | 12.08 | +5.9% |
-| DY | DYCOM INDUSTRIES INC | 179.01 | -18.0% |
-| ADI | ANALOG DEVICES INC | 312.95 | -17.4% |
-| SMTC | SEMTECH CORP | 86.46 | -17.0% |
-| DIOD | DIODES INC /DEL/ | 72.51 | -12.2% |
-| TXN | TEXAS INSTRUMENTS INC | 258.44 | -11.2% |
+| HPQ | HP INC | 30.97 | +10.8% |
+| AGYS | AGILYSYS INC | 118.39 | +4.2% |
+| CAR | AVIS BUDGET GROUP, INC. | 134.81 | +4.2% |
+| MZTI | MARZETTI CO | 113.43 | +4.0% |
+| CAG | CONAGRA BRANDS INC. | 15.67 | +3.9% |
+| LRCX | LAM RESEARCH CORP | 174.74 | -10.9% |
+| MU | MICRON TECHNOLOGY INC | 561.84 | -10.8% |
+| NBIS | Nebius Group N.V. | 78.98 | -9.5% |
+| AMAT | APPLIED MATERIALS INC /DE | 295.95 | -8.6% |
+| ONTO | ONTO INNOVATION INC. | 159.27 | -8.2% |
 
 ## Recent refresh runs
 
 | Started | Outcome |
 |---|---|
+| 2026-11-25 12:07:44 | ok |
 | 2026-11-24 16:48:30 | ok |
 | 2026-11-24 16:43:04 | ok |
 | 2026-11-23 07:09:57 | ok |
